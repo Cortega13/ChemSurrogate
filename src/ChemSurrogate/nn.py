@@ -1,46 +1,58 @@
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, hidden_dim, noise=0.0):
+    def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.0, dropout=0.0):
         super(Autoencoder, self).__init__()
         
-        # Encoder
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim, bias=False),
-            nn.BatchNorm1d(hidden_dim),
+            nn.Linear(input_dim, hidden_dims[0], bias=False),
+            nn.BatchNorm1d(hidden_dims[0]),
             nn.GELU(),
+            nn.Dropout(dropout),
             
-            nn.Linear(hidden_dim, latent_dim),
+            nn.Linear(hidden_dims[0], hidden_dims[1], bias=False),
+            nn.BatchNorm1d(hidden_dims[1]),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        
+            nn.Linear(hidden_dims[1], latent_dim),
             nn.RMSNorm(latent_dim),
             nn.GELU(),
         )
-
-        # Decoder
+        
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim, bias=False),
-            nn.BatchNorm1d(hidden_dim),
+            nn.Linear(latent_dim, hidden_dims[1], bias=False),
+            nn.BatchNorm1d(hidden_dims[1]),
             nn.GELU(),
+            nn.Dropout(dropout),
             
-            nn.Linear(hidden_dim, input_dim),
-            nn.ReLU(),
+            nn.Linear(hidden_dims[1], hidden_dims[0], bias=False),
+            nn.BatchNorm1d(hidden_dims[0]),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dims[0], input_dim),
+            nn.Sigmoid(),
         )
         
         self.noise = noise
 
     def encode(self, x):
-        return self.encoder(x)
+        z = self.encoder(x)
+        return z
 
     def decode(self, z):
         return self.decoder(z)
 
     def forward(self, x):
         z = self.encode(x)
-        noise = torch.randn_like(z) * self.noise
-        z += noise
+        if self.training and self.noise > 0:
+            noise = torch.randn_like(z) * self.noise
+            z += noise
         x_reconstructed = self.decode(z)
-        return x_reconstructed
+        return x_reconstructed, z
 
 
 class Emulator(nn.Module):
@@ -78,18 +90,18 @@ class ResidualBlock(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.RMSNorm(hidden_dim),
+            nn.Linear(input_dim, hidden_dim, bias=False),
+            nn.BatchNorm1d(hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
             
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.RMSNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim, bias=False),
+            nn.BatchNorm1d(hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
             
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.RMSNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim, bias=False),
+            nn.BatchNorm1d(hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
             
@@ -101,19 +113,25 @@ class ResidualBlock(nn.Module):
 
 
 class RecursiveResNet(nn.Module):
-    def __init__(self, input_dim=17, hidden_dim=64, num_blocks=4, dropout=0.0):
+    def __init__(self, input_dim=17, hidden_dim=64, output_dim=12, num_blocks=2, dropout=0.0):
         super().__init__()
         
         self.blocks = nn.ModuleList([
             ResidualBlock(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
-                output_dim=input_dim,
+                output_dim=output_dim,
                 dropout=dropout
             ) for _ in range(num_blocks)
         ])
         
     def forward(self, x):
+        params = x[:, :5]
+        x = x[:, 5:]
+        
         for block in self.blocks:
+            x = torch.cat([params, x], dim=1)
             x = block(x)
         return x
+
+

@@ -78,12 +78,12 @@ class EMConfig:
     num_blocks = 2
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-3
     lr_decay = 0.6
     lr_decay_patience = 10
     betas = (0.99, 0.999)
-    weight_decay = 1e-2
-    loss_scaling_factor = 1e-2
+    weight_decay = 1e-3
+    loss_scaling_factor = 1e-3
     exponential_coefficient = 20
     alpha = 3e3
     batch_size = 12*8192
@@ -91,7 +91,7 @@ class EMConfig:
     gradient_clipping = 10
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.01
+    dropout = 0
     save_model = True
     shuffle = True
 

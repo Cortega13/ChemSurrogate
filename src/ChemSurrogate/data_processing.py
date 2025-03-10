@@ -241,16 +241,14 @@ def generate_stoichiometric_matrix():
 
 
 def calculate_component_scalers(
-    dataset_np: np.ndarray | torch.Tensor,
+    dataset_t: torch.Tensor,
     encoding_batch_size: int = 32*8192
 ):
-    dataset_np = abundances_scaling(dataset_np)
-    dataset_t = torch.from_numpy(dataset_np)
     
     ae = Autoencoder(
         input_dim=DatasetConfig.num_species,
         latent_dim=AEConfig.latent_dim,
-        hidden_dim=AEConfig.hidden_dim,
+        hidden_dims=AEConfig.hidden_dims,
     ).to("cuda")
     ae.load_state_dict(torch.load(AEConfig.save_model_path))
     ae.eval()
@@ -288,36 +286,20 @@ def abundances_scaling(
     np.log10(abundances, out=abundances)
     np.subtract(abundances, min_, out=abundances)
     np.divide(abundances, (max_ - min_), out=abundances)
-    return abundances
 
 
-def abundances_scaling_t(
-    abundances: torch.Tensor, 
-    min_: torch.Tensor = PredefinedTensors.ab_min.cpu(), 
-    max_: torch.Tensor = PredefinedTensors.ab_max.cpu(),
-    ):
-    """
-    Abundances are log10'd and then minmax scaled between (0, 1) for easier training.
-    """
-    abundances = torch.log10(abundances)
-    abundances = (abundances - min_) / (max_ - min_)
-    return abundances
-
-
-@torch.jit.script
-def inverse_abundances_scaling_cpu(
-    scaled_abundances: torch.Tensor, 
-    min_: torch.Tensor = PredefinedTensors.ab_min.cpu(), 
-    max_: torch.Tensor = PredefinedTensors.ab_max.cpu(),
-    exponent: torch.Tensor = PredefinedTensors.exponential.cpu(),
+def inverse_abundances_scaling_np(
+    abundances: np.array, 
+    min_: np.array = PredefinedTensors.ab_min.cpu().numpy(), 
+    max_: np.array = PredefinedTensors.ab_max.cpu().numpy(),
+    exponent: np.array = PredefinedTensors.exponential.cpu(),
     ):
     """
     Scaled abundances are inverse transformed and then exponentiated.
     """
-    
-    log_abundances = scaled_abundances * (max_ - min_) + min_
-    abundances = torch.exp(exponent * log_abundances)
-    return abundances
+    np.multiply(abundances, (max_ - min_), out=abundances)
+    np.add(abundances, min_, out=abundances)
+    np.exp(exponent * abundances, out=abundances)
 
 
 @torch.jit.script
@@ -330,7 +312,6 @@ def inverse_abundances_scaling(
     """
     Scaled abundances are inverse transformed and then exponentiated.
     """
-    
     log_abundances = scaled_abundances * (max_ - min_) + min_
     abundances = torch.exp(exponent * log_abundances)
     return abundances
@@ -384,40 +365,80 @@ def calculate_conservation_loss(
     
     elemental_abundances1 = torch.abs(stoichiometric_matrix_mult(unscaled_tensor1))
     elemental_abundances2 = torch.abs(stoichiometric_matrix_mult(unscaled_tensor2))
-            
+
     log_elemental_abundances1 = torch.log10(elemental_abundances1)
     log_elemental_abundances2 = torch.log10(elemental_abundances2)
     
-    log_elemental_abundances1[:, -2:] = log_elemental_abundances1[:, -2:]*0.5
-    log_elemental_abundances2[:, -2:] = log_elemental_abundances2[:, -2:]*0.5
+    diff = torch.abs(log_elemental_abundances2 - log_elemental_abundances1)
+    diff[:, -2:] = diff[:, -2:]*0.05
     
-    loss = torch.sum(torch.abs(log_elemental_abundances2 - log_elemental_abundances1)) / tensor1.size(0) # Divide by size to normalize across batches.
-    return loss
+    return torch.sum(diff) / tensor1.size(0)
+
+
+@torch.jit.script
+def calculate_structural_loss(
+    targets: torch.Tensor,
+    latent_components: torch.Tensor,
+    num_anchors: int = 3*64,
+    eps: torch.Tensor = torch.tensor(1e-8).to("cuda").float(),
+    device: torch.device = device,
+):
+    """
+    Anchor-based latent structure loss. 
+    Random points are sampled from regular and latent space.
+    Distances of all points to these anchors are calculated and normalized.
+    These normalized distances are compared to calculate the loss.
+    """
+    batch_size = targets.size(0)
+    
+    anchor_indices = torch.randperm(batch_size, device=device)[:num_anchors]
+    
+    target_anchors = torch.index_select(targets, 0, anchor_indices)
+    latent_anchors = torch.index_select(latent_components, 0, anchor_indices)
+    
+    target_dists = torch.cdist(targets, target_anchors, p=2.0)
+    
+    latent_dists = torch.cdist(latent_components, latent_anchors, p=2.0)
+    
+    target_dists_max = torch.max(target_dists)
+    latent_dists_max = torch.max(latent_dists)
+    
+    target_dists_normalized = target_dists / (target_dists_max + eps)
+    latent_dists_normalized = latent_dists / (latent_dists_max + eps)
+    
+    return torch.mean((target_dists_normalized - latent_dists_normalized) ** 2)
 
 
 @torch.jit.script
 def autoencoder_loss_function(
     outputs: torch.Tensor, 
-    targets: torch.Tensor, 
-    alpha: torch.Tensor = PredefinedTensors.AE_alpha,
+    targets: torch.Tensor,
+    latent_components: torch.Tensor,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     loss_scaling_factor: torch.Tensor = PredefinedTensors.AE_loss_scaling_factor,
+    conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
+    structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
     ):
     """
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
     """
     
     elementwise_loss = torch.abs(outputs - targets)
-    elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss)
+    elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss) - 1
     elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
     
-    conservation_error = calculate_conservation_loss(outputs, targets)
+    conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets)
+    
+    local_structure_loss = structural_weight * calculate_structural_loss(
+        targets, 
+        latent_components
+        )
         
-    total_loss = elementwise_loss + alpha*conservation_error
+    total_loss = (elementwise_loss +  conservation_error + local_structure_loss)
     total_loss *= loss_scaling_factor
     
-    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {alpha*conservation_error.detach():.3e} | Total: {total_loss.detach():.3e}")
+    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Local: {local_structure_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
@@ -434,14 +455,14 @@ def emulator_training_loss_function(
     This is the custom loss function for the emulator. It's a combination of the predictive loss and the conservation loss.
     """
     elementwise_loss = torch.abs(outputs - targets)
-    elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss)
-    elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
+    exp_elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss) - 1
+    sum_elementwise_loss = torch.sum(exp_elementwise_loss) / targets.size(0)
     
     conservation_error = calculate_conservation_loss(outputs, targets)
     
-    total_loss = elementwise_loss + alpha*conservation_error
+    total_loss = sum_elementwise_loss + alpha*conservation_error
     total_loss = total_loss * loss_scaling_factor
-    #print(f"Recon: {elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
+    #print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
     return total_loss
 
 
@@ -473,10 +494,12 @@ class RowRetrievalDataset(Dataset):
     def __init__(
         self,
         data_matrix: torch.Tensor,
-        index_pairs: torch.Tensor
+        index_pairs: torch.Tensor,
+        sequential_time=False,
     ):
         self.data_matrix = data_matrix
         self.index_pairs = index_pairs
+        self.sequential_time = sequential_time
         self.num_metadata = DatasetConfig.num_metadata
         self.num_physical_parameters = DatasetConfig.num_physical_parameters
         self.num_species = DatasetConfig.num_species
@@ -507,13 +530,17 @@ class RowRetrievalDataset(Dataset):
         
         features = rows[:, 0, :]
         targets = rows[:, 1, :]
-        timesteps = (pairs[:, 2].unsqueeze(1).float() / self.num_timesteps).float()
         
         left_index = self.num_metadata
         right_index = left_index + self.num_physical_parameters
         physical_parameters = features[:, left_index:right_index]
-        encoded_components = features[:, -self.num_components:]        
-        features = torch.cat((timesteps, physical_parameters, encoded_components), dim=1)
+        encoded_components = features[:, -self.num_components:]
+        
+        if self.sequential_time:
+            features = torch.cat((physical_parameters, encoded_components), dim=1)
+        else:
+            timesteps = (pairs[:, 2].unsqueeze(1).float() / self.num_timesteps).float()
+            features = torch.cat((timesteps, physical_parameters, encoded_components), dim=1)
         
         left_index = self.num_metadata + self.num_physical_parameters
         right_index = left_index + self.num_species
@@ -573,13 +600,6 @@ class ChunkedShuffleSampler(Sampler):
         return self.data_size
 
 
-def create_row_indices(
-    dataset_np: np.ndarray
-    ):
-    dataset_np[:, 0] = np.arange(len(dataset_np), dtype=np.float32)
-    return dataset_np
-
-
 @njit
 def calculate_emulator_index_pairs(
     dataset_np: np.ndarray
@@ -617,47 +637,74 @@ def calculate_emulator_index_pairs(
     return index_pairs
 
 
-def physical_parameter_scaling(
+@njit
+def calculate_emulator_index_pairs_sequential(
     dataset_np: np.ndarray
+    ):
+    """
+    Returns a 2D array with sequences padded with -1 values.
+    For each model with indices [0,1,2,...,n]:
+    - First sequence: [0,1,2,...,n]
+    - Second sequence: [1,2,3,...,n]
+    - And so on, with the last sequence being [n-1, n]
+    Padding value of -1 indicates end of valid data.
+    """
+    change_indices = np.where(np.diff(dataset_np[:, 1].astype(np.int32)) != 0)[0] + 1
+    model_groups = np.split(dataset_np, change_indices)
+    
+    total_seqs = 0
+    max_seq_len = 0
+    for group in model_groups:
+        n = len(group)
+        total_seqs += n - 1
+        max_seq_len = max(max_seq_len, n)
+    
+    sequences = np.full((total_seqs, max_seq_len), -1, dtype=np.int32)
+    
+    seq_idx = 0
+    for group in model_groups:
+        indices = group[:, 0]
+        n = len(indices)
+        
+        for start_idx in range(n-1):
+            seq_len = n - start_idx
+            sequences[seq_idx, :seq_len] = indices[start_idx:]
+            seq_idx += 1
+    
+    return sequences
+
+
+def physical_parameter_scaling(
+    physical_parameters: np.ndarray
     ):
     """
     Preprocesses the dataset by minmax scaling the latent components to (0, 1) and scaling the physical parameters.
     """
-    # Log10 scaling the physical parameters.
-    left_index = DatasetConfig.num_metadata
-    right_index = left_index + DatasetConfig.num_physical_parameters
     np.log10(
-        dataset_np[:, left_index:right_index],
-        out=dataset_np[:, left_index:right_index]
+        physical_parameters,
+        out=physical_parameters
     )
-    # Minmax scaling the physical parameters.
     for i, parameter in enumerate(DatasetConfig.physical_parameter_ranges):
         param_min, param_max = DatasetConfig.physical_parameter_ranges[parameter]
         log_param_min, log_param_max = np.log10(param_min), np.log10(param_max)
-        index = DatasetConfig.num_metadata + i
-        dataset_np[:, index] = (dataset_np[:, index] - log_param_min) / (log_param_max - log_param_min)
-    
-    return dataset_np
+        
+        physical_parameters[:, i] = (physical_parameters[:, i] - log_param_min) / (log_param_max - log_param_min)
 
 
 def inverse_physical_parameter_scaling(
-    scaled_dataset_t: torch.Tensor
+    physical_parameters: np.array
     ):
     """
     Reverses the preprocessing of the dataset by applying inverse min-max scaling and exponentiation
-    to recover the original physical parameter values.
-    """
-    num_physical_parameters = len(DatasetConfig.physical_parameters)
-        
-    for idx, parameter in enumerate(DatasetConfig.physical_parameter_ranges):
+    to recover the original physical parameter values. Operates in-place.
+    """        
+    for i, parameter in enumerate(DatasetConfig.physical_parameter_ranges):
         param_min, param_max = DatasetConfig.physical_parameter_ranges[parameter]
         log_param_min, log_param_max = np.log10(param_min), np.log10(param_max)
         
-        scaled_dataset_t[:, idx] = scaled_dataset_t[:, idx] * (log_param_max - log_param_min) + log_param_min
-        
-    scaled_dataset_t[:, :num_physical_parameters] = 10 ** scaled_dataset_t[:, :num_physical_parameters]
+        physical_parameters[:, i] = physical_parameters[:, i] * (log_param_max - log_param_min) + log_param_min
     
-    return scaled_dataset_t
+    np.power(10, physical_parameters, out=physical_parameters)
 
 
 def encode_dataset(
@@ -669,55 +716,59 @@ def encode_dataset(
     ae = Autoencoder(
         input_dim=DatasetConfig.num_species,
         latent_dim=AEConfig.latent_dim,
-        hidden_dim=AEConfig.hidden_dim,
+        hidden_dims=AEConfig.hidden_dims,
     ).to("cuda")
     ae.load_state_dict(torch.load(AEConfig.save_model_path))
     ae.eval()
     
-    encoded_batches = []
+    num_samples = len(dataset_t)
+    latent_dim = AEConfig.latent_dim
+    encoded_dataset = torch.zeros((num_samples, latent_dim))
+    
     with torch.no_grad():
-        for batch_start in range(0, len(dataset_t), encoding_batch_size):
-            batch_end = min(batch_start + encoding_batch_size, len(dataset_t))
-            batch = dataset_t[batch_start:batch_end]
-            batch_tensor = batch.to("cuda")
-            encoded_batch = ae.encode(batch_tensor)
-            encoded_batches.append(encoded_batch.cpu())
-
-    encoded_dataset = torch.cat(encoded_batches, dim=0)
+        for batch_start in range(0, num_samples, encoding_batch_size):
+            batch_end = min(batch_start + encoding_batch_size, num_samples)
+            batch_tensor = dataset_t[batch_start:batch_end].to("cuda")
+            encoded_dataset[batch_start:batch_end] = ae.encode(batch_tensor).cpu()
     
-    encoded_dataset = latent_components_scaling(encoded_dataset)
-    
-    return encoded_dataset
+    return latent_components_scaling(encoded_dataset)
 
 
-def prepare_emulator_dataset(dataset_np):
+def prepare_emulator_dataset(
+    dataset_np: np.array, 
+    sequential_time: bool = False
+    ):
     """
     Generates index pairs for training.
     Generates latent components using autoencoder for the dataset.
     Scales physical parameters
     """
     num_species = DatasetConfig.num_species
-    dataset_np = create_row_indices(dataset_np)
-        
-    dataset_np = physical_parameter_scaling(dataset_np)
-        
-    dataset_np[:, -num_species:] = abundances_scaling(dataset_np[:, -num_species:])
+    num_params = DatasetConfig.num_physical_parameters
+    num_metadata = DatasetConfig.num_metadata
+    
+    dataset_np[:, 0] = np.arange(len(dataset_np))
+    
+    physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
+    abundances_scaling(dataset_np[:, -num_species:])
     
     latent_components = encode_dataset(dataset_np[:, -num_species:])
-    
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
-    del dataset_np, latent_components
     
-    index_pairs_np = calculate_emulator_index_pairs(encoded_dataset_np)
+    if sequential_time:
+        index_pairs_np = calculate_emulator_index_pairs(encoded_dataset_np)
+    else:
+        index_pairs_np = calculate_emulator_index_pairs_sequential(encoded_dataset_np)
     
+    perm = np.random.permutation(len(index_pairs_np))
+    index_pairs_shuffled_np = index_pairs_np[perm]
+
     encoded_t = torch.from_numpy(encoded_dataset_np).float()
-    index_pairs_t = torch.from_numpy(index_pairs_np).int()
+    index_pairs_shuffled_t = torch.from_numpy(index_pairs_shuffled_np).int()
     
-    perm = torch.randperm(index_pairs_t.size(0))
-    index_pairs_shuffled_t = index_pairs_t[perm]
     gc.collect()
     torch.cuda.empty_cache()
-
+    
     return (encoded_t, index_pairs_shuffled_t)
 
 
@@ -744,8 +795,7 @@ def load_tensors_from_hdf5(
 
 
 def collate_function(batch):
-    features, targets = batch
-        
+    features, targets = batch  
     return features, targets
 
 
@@ -779,21 +829,26 @@ def reconstruct_emulated_outputs(encoded_inputs, emulated_outputs):
 
 
 def baseAvtoAv(
-    baseAv,
-    density
+    physical_parameters: np.array,
     ):
     """
     This conversion is used internally in UCLCHEM. Our dataset has Av, although the dataset was generated using baseAv.
     """
-    return baseAv + density * 0.0000964375
+    baseAv_idx = 2
+    density_idx = 0
+    multiplier = 0.0000964375
+    np.add(physical_parameters[:, baseAv_idx], physical_parameters[:, density_idx], out=physical_parameters[:, baseAv_idx])
+    np.multiply(physical_parameters[:, baseAv_idx], multiplier, out=physical_parameters[:, baseAv_idx])
+
 
 ### Inferencing Functions
 def encoder_inferencing(autoencoder, inputs, batch_size=8192):
-    preencoded_features = abundances_scaling_t(inputs[:, -DatasetConfig.num_species:])
+    num_inputs = inputs.size(0)
+    
     encoded_features = []
-    for batch_start in range(0, len(preencoded_features), batch_size):
-        batch_end = min(batch_start + batch_size, len(preencoded_features))
-        batch = preencoded_features[batch_start:batch_end]
+    for batch_start in range(0, num_inputs, batch_size):
+        batch_end = min(batch_start + batch_size, num_inputs)
+        batch = inputs[batch_start:batch_end]
         batch = batch.to(device)
         batch_encoded = autoencoder.encode(batch)
         encoded_features.append(batch_encoded)
@@ -817,14 +872,11 @@ def decoder_inferencing(autoencoder, emulated_features, batch_size=8192):
     return decoded_features
 
 
-def emulator_inferencing(emulator, encoded_inputs, scale_components=True, convert_base_av=False, batch_size=8192):
+def emulator_inferencing(emulator, encoded_inputs, scale_components=True, batch_size=8192):
     num_physical_parameters = DatasetConfig.num_physical_parameters
     
     if scale_components:
         encoded_inputs[:, 1+num_physical_parameters:] = latent_components_scaling(encoded_inputs[:, 1+num_physical_parameters:])
-    
-    if convert_base_av:
-        encoded_inputs[:, 3] = baseAvtoAv(encoded_inputs[:, 3], encoded_inputs[:, 1]) # Convert baseav to av. 
 
     emulated_outputs = []
     for batch_start in range(0, len(encoded_inputs), batch_size):

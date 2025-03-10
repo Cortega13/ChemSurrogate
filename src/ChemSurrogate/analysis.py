@@ -8,77 +8,65 @@ from . import data_processing as dp
 
 
 def sample_initial_conditions(
-    n_samples: int = 100000
+    n_samples: int = 100000,
+    convert_base_av: bool = True,
     ):
     """
     Generate initial conditions for the parameter sampling plots where physical conditions are varied.
     """
+    inputs = np.random.uniform(0, 1, size=(n_samples, DatasetConfig.num_physical_parameters))
+    if convert_base_av:
+        dp.inverse_physical_parameter_scaling(inputs)
+        dp.baseAvtoAv(inputs)
+        dp.physical_parameter_scaling(inputs)
+    
+    initial_abundances = DatasetConfig.initial_abundances.copy()
+    dp.abundances_scaling(initial_abundances)
         
-    data_rows = []
-    for _ in range(n_samples):
-        sampled_values = []
-        for param in DatasetConfig.physical_parameter_ranges:
-            low, high = np.log10(DatasetConfig.physical_parameter_ranges[param])
-            val_log10 = np.random.uniform(low, high)
-            sampled_values.append(val_log10)
-
-        sampled_values = np.array(sampled_values, dtype=np.float32)
-        row = np.hstack((sampled_values, DatasetConfig.initial_abundances.squeeze(0)))
-        data_rows.append(row)
-    
-    data_rows = np.array(data_rows, dtype=np.float32)
-    
-    physical_parameter_ranges = DatasetConfig.physical_parameter_ranges
-    for i, parameter in enumerate(physical_parameter_ranges):
-        param_min, param_max = physical_parameter_ranges[parameter]
-        log_param_min, log_param_max = np.log10(param_min), np.log10(param_max)
-        data_rows[:, i] = (data_rows[:, i] - log_param_min) / (log_param_max - log_param_min)
-
-    inputs = torch.tensor(np.vstack(data_rows), dtype=torch.float32)
-    
+    initial_abundances_repeated = np.tile(initial_abundances, (n_samples, 1))
+    inputs = np.hstack((inputs, initial_abundances_repeated))
     return inputs
 
 
 def add_timesteps_to_conditions(
-    initial_conditions: torch.Tensor,
-    num_timesteps:int = 95
+    initial_conditions: np.array,
+    num_timesteps:int = 1
     ):
     """
     Adds a time column to the initial conditions tensor.
     """
     time_as_fraction = (num_timesteps / DatasetConfig.num_timesteps_per_model)
     batch_size = initial_conditions.shape[0]
-    time_column = torch.full((batch_size, 1), time_as_fraction, dtype=initial_conditions.dtype, device=initial_conditions.device)
+    time_column = np.full((batch_size, 1), time_as_fraction)
     
-    initial_conditions_with_time = torch.cat((time_column, initial_conditions), dim=1)
+    initial_conditions_with_time = np.hstack((time_column, initial_conditions))
     return initial_conditions_with_time
 
 
 def add_multiple_timesteps_to_conditions(
-    initial_conditions: torch.Tensor,
+    initial_conditions: np.array,
     num_timesteps: int = 95
 ):
     """
     Expands the initial conditions tensor to include copies for each timestep.
     Adds a time column to the expanded tensor.
     """
-    time_values = torch.linspace(1, num_timesteps, steps=num_timesteps, device=initial_conditions.device).view(num_timesteps, 1) / 100
+    time_values = np.linspace(1, num_timesteps, num=num_timesteps).reshape(num_timesteps, 1) / 100
 
-    expanded_conditions = initial_conditions.repeat(num_timesteps, 1)
+    expanded_conditions = np.tile(initial_conditions, (num_timesteps, 1))
 
-    conditions_with_time = torch.cat((time_values, expanded_conditions), dim=1)
+    conditions_with_time = np.hstack((time_values, expanded_conditions))
     
     return conditions_with_time
 
 
-def reconstruct_results(initial_conditions_with_time, decoded_features):
-    scaled_physical_parameters = initial_conditions_with_time[:, 1:1+DatasetConfig.num_physical_parameters]
-    
-    physical_parameters = dp.inverse_physical_parameter_scaling(scaled_physical_parameters)
+def reconstruct_results(inputs, outputs):
+    physical_parameters = inputs[:, 1:1+DatasetConfig.num_physical_parameters]
+    dp.inverse_physical_parameter_scaling(physical_parameters)
     
     columns = DatasetConfig.physical_parameters + DatasetConfig.species
-    results = torch.cat((physical_parameters, decoded_features.cpu()), dim=1)
-    results_df = pd.DataFrame(results.numpy(), columns=columns)
+    results = np.hstack((physical_parameters, outputs))
+    results_df = pd.DataFrame(results, columns=columns)
     
     return results_df
 
@@ -90,7 +78,7 @@ def benchmark_speed(DATASET, AE_CONFIG, EMULATOR_CONFIG):
 ### Plot Functions
 def histogram_physical_parameters(
     sampled_physical_parameters: np.array,
-    savefig_path: str = "plots/parameter_sampling.png"
+    savefig_path: str = None
     ):
     """
     Generate histograms for the sampled physical conditions to visualize distribution.
@@ -106,14 +94,15 @@ def histogram_physical_parameters(
         axs[row, col].set_ylabel("Count")
     
     plt.tight_layout()
-    plt.savefig(savefig_path, dpi=300, bbox_inches="tight")    
+    if savefig_path:
+        plt.savefig(savefig_path, dpi=300, bbox_inches="tight")    
 
 
 def plot_abundances_vs_time_comparison(
     actual: pd.DataFrame, 
     predicted: pd.DataFrame, 
     species_of_interest: list, 
-    output_path: str = "plots/abundances_vs_time/unnamed.png"
+    output_path: str = None
     ):
     """
     Plotting the reconstructed and original abundances on a chemical evolution plot.
@@ -123,7 +112,7 @@ def plot_abundances_vs_time_comparison(
     phys_params = physical_parameters.iloc[0]
     params_text = "\n".join([f"{param}: {phys_params[param]:.3f}" for param in physical_parameters.columns])
     
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(10, 10))
     colors = plt.colormaps.get_cmap('tab20')
     
     timesteps = np.arange(0, min(len(actual), len(predicted)))
@@ -149,7 +138,9 @@ def plot_abundances_vs_time_comparison(
     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), title=params_text)
 
     plt.tight_layout()
-    plt.savefig(output_path, dpi=200, bbox_inches="tight")
+    if output_path:
+        output_path = os.path.join(DatasetConfig.working_path, output_path)
+        plt.savefig(output_path, dpi=200, bbox_inches="tight")
     
 
 def scatter_abundances_vs_physical_parameters(
@@ -191,10 +182,11 @@ def scatter_abundances_vs_physical_parameters(
                 label=species
             )
 
-            ax.set_xlabel(f"Log {varying_param}")
-            ax.set_ylabel(f"Log {species} Abundance")
+            ax.set_xlabel(f"Log {species} Abundance")
+            ax.set_ylabel(f"Log {varying_param}")
             ax.set_title(f"Log {varying_param} vs. Log {species}")
             ax.grid(True)
+            ax.set_ylim(-20, 0)
 
             channel_info = (
                 f"R = {other_params[0]} "

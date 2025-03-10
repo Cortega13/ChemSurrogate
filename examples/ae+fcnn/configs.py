@@ -45,27 +45,25 @@ class AEConfig:
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
     input_dim = DatasetConfig.num_species # input_dim = output_dim
-    hidden_dims = (320, 160)
+    hidden_dim = 600
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 5e-5
+    lr = 6e-5
     lr_decay = 0.5
     lr_decay_patience = 20
-    betas = (0.9, 0.99)
-    weight_decay = 1e-3
-    loss_scaling_factor = 1e-1
-    exponential_coefficient = 24
-    conservation_weight = 4e2
-    structural_weight = 4e3
-    batch_size = 4*8192
+    betas = (0.6, 0.7)
+    weight_decay = 0
+    loss_scaling_factor = 1e-3
+    exponential_coefficient = 36
+    alpha = 1e2
+    batch_size = 8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 2
-    dropout = 0.0
-    noise = 0.05
-    save_model = True
+    gradient_clipping = 4
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
+    noise = 0.1
+    save_model = False
 
     
 class EMConfig:
@@ -73,52 +71,49 @@ class EMConfig:
     num_columns = len(columns)
     # Model Config
     input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim + 1 # The 1 is for the time input.
-    hidden_dim = 256
+    hidden_dim = 300
     output_dim = AEConfig.latent_dim
-    num_blocks = 2
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-3
     lr_decay = 0.6
-    lr_decay_patience = 10
-    betas = (0.99, 0.999)
-    weight_decay = 1e-2
-    loss_scaling_factor = 1e-2
-    exponential_coefficient = 20
-    alpha = 3e3
-    batch_size = 12*8192
+    lr_decay_patience = 3
+    betas = (0.4, 0.5)
+    weight_decay = 2e-5
+    loss_scaling_factor = 1e-3
+    exponential_coefficient = 18
+    alpha = 1e3
+    batch_size = 4*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 10
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.01
+    gradient_clipping = 1
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/emulator.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/emulator.pth")
+    dropout = 0.14
     save_model = True
     shuffle = True
 
 
 class PredefinedTensors:
-    ab_min = torch.tensor(np.log10(DatasetConfig.abundances_lower_clipping), device=device).float()
-    ab_max = torch.tensor(np.log10(DatasetConfig.abundances_upper_clipping), device=device).float()
+    ab_min = torch.tensor(np.log10(DatasetConfig.abundances_lower_clipping), dtype=torch.float32).to(device)
+    ab_max = torch.tensor(np.log10(DatasetConfig.abundances_upper_clipping), dtype=torch.float32).to(device)
 
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     ae_min, ae_max = np.load(component_scalers_path)
-    ae_min = torch.tensor(ae_min, device=device).float()
-    ae_max = torch.tensor(ae_max, device=device).float()
+    ae_min = torch.tensor(ae_min, dtype=torch.float32).to(device)
+    ae_max = torch.tensor(ae_max, dtype=torch.float32).to(device)
     
-    stoichiometric_matrix = torch.tensor(DatasetConfig.stoichiometric_matrix, device=device).float().contiguous()
+    stoichiometric_matrix = torch.tensor(DatasetConfig.stoichiometric_matrix, dtype=torch.float32).to(device).contiguous()
     
-    exponential = torch.log(torch.tensor(10, device=device).float())
+    exponential = torch.log(torch.tensor(10, dtype=torch.float32)).to(device)
 
-    AE_loss_scaling_factor = torch.tensor(AEConfig.loss_scaling_factor, device=device).float()
-    EM_loss_scaling_factor = torch.tensor(EMConfig.loss_scaling_factor, device=device).float()
+    AE_loss_scaling_factor = torch.tensor(AEConfig.loss_scaling_factor, dtype=torch.float32).to(device)
+    EM_loss_scaling_factor = torch.tensor(EMConfig.loss_scaling_factor, dtype=torch.float32).to(device)
     
-    AE_exponential_coefficient = torch.tensor(AEConfig.exponential_coefficient, device=device).float()
-    EM_exponential_coefficient = torch.tensor(EMConfig.exponential_coefficient, device=device).float()
+    AE_exponential_coefficient = torch.tensor(AEConfig.exponential_coefficient, dtype=torch.float32).to(device)
+    EM_exponential_coefficient = torch.tensor(EMConfig.exponential_coefficient, dtype=torch.float32).to(device)
     
-    AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
-    AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
+    AE_alpha = torch.tensor(AEConfig.alpha, dtype=torch.float32).to(device)
+    EM_alpha = torch.tensor(EMConfig.alpha, dtype=torch.float32).to(device)
     
-    EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
-    
-    mace_max_abundance = torch.tensor(0.85, device=device).float()
-    mace_factor = torch.tensor(468/335, device=device).float()
+    mace_max_abundance = torch.tensor(0.85, dtype=torch.float32).to(device)
+    mace_factor = torch.tensor(468/335, dtype=torch.float32).to(device)

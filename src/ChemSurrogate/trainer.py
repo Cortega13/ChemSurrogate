@@ -4,7 +4,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from .nn import Autoencoder, Emulator
+from .nn import Autoencoder, Emulator, RecursiveResNet
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
@@ -92,7 +92,7 @@ class Trainer:
             self.loss_per_epoch.append(metric)
         else:
             self.stagnant_epochs += 1
-            print(f"Stagnant {self.stagnant_epochs} \nMinimum: {self.metric_minimum_loss:.3e} \nMean: {mean_loss:.3e} \nStd: {std_loss:.3e} \nMax: {max_loss:.3e}")
+            print(f"Stagnant {self.stagnant_epochs} \nMinimum: {self.metric_minimum_loss:.3e} \nMean: {mean_loss:.3e} \nStd: {std_loss:.3e} \nMax: {max_loss:.3e} \nMetric: {metric:.3e}")
         
         self.epoch_validation_loss.zero_()
         self.scheduler.step(metric)
@@ -128,13 +128,14 @@ class AutoencoderTrainer(Trainer):
             validation_dataloader=validation_dataloader,
         )
 
+
     def _run_training_batch(self, features):
         """
         Runs a training batch where features = targets since this is an autoencoder.
         """
         self.optimizer.zero_grad()
-        outputs = self.model(features)
-        loss = dp.autoencoder_loss_function(outputs, features)
+        outputs, z = self.model(features)
+        loss = dp.autoencoder_loss_function(outputs, features, z)
                 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), AEConfig.gradient_clipping)
@@ -227,11 +228,14 @@ class EmulatorTrainer(Trainer):
         outputs = self.model(features)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
-                
         loss = dp.emulator_training_loss_function(outputs, targets)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
         self.optimizer.step()
+        # for name, param in self.model.named_parameters():
+        #     if param.grad is not None:
+        #         grad_norm = param.grad.norm().item()
+        #         print(f"Gradient norm for {name}: {grad_norm:.4e}")
 
 
     def _run_validation_batch(self, features, targets):
@@ -291,12 +295,22 @@ class EmulatorTrainer(Trainer):
         print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
 
 
-def load_autoencoder_objects(is_inference=False):
+# Squeeeeeze performance functions
+def freeze_bn_layers(model):
+    for module in model.modules():
+        if isinstance(module, torch.nn.BatchNorm1d):
+            module.eval()
+            for param in module.parameters():
+                param.requires_grad = False
+
+
+def load_autoencoder_objects(is_inference=False, final_training_phase=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
         latent_dim=AEConfig.latent_dim,
-        hidden_dim=AEConfig.hidden_dim,
+        hidden_dims=AEConfig.hidden_dims,
         noise=0.0 if is_inference else AEConfig.noise,
+        dropout=0.0 if is_inference else AEConfig.dropout,
     ).to(device)
     if os.path.exists(AEConfig.pretrained_model_path):
         print("Loading Pretrained Model")
@@ -306,6 +320,9 @@ def load_autoencoder_objects(is_inference=False):
         ae.eval()
         for param in ae.parameters():
             param.requires_grad = False
+    elif final_training_phase:
+        print("Final Training Phase Activated (batchnorm frozen)")
+        freeze_bn_layers(ae)
     
 
     optimizer = optim.AdamW(
@@ -323,6 +340,9 @@ def load_autoencoder_objects(is_inference=False):
         patience=AEConfig.lr_decay_patience,
     )
 
+    total_params = sum(p.numel() for p in ae.parameters())
+    print(f"Total Parameters: {total_params}")
+
     return ae, optimizer, scheduler
 
 
@@ -330,7 +350,7 @@ def load_emulator_objects(is_inference=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
         latent_dim=AEConfig.latent_dim,
-        hidden_dim=AEConfig.hidden_dim,
+        hidden_dims=AEConfig.hidden_dims,
     ).to(device)
     if os.path.exists(AEConfig.pretrained_model_path):
         ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
@@ -370,3 +390,61 @@ def load_emulator_objects(is_inference=False):
     )
 
     return emulator, ae, optimizer, scheduler
+
+
+def load_skipcon_emulator_objects(is_inference=False, final_training_phase=False):
+    ae = Autoencoder(
+        input_dim=AEConfig.input_dim,
+        latent_dim=AEConfig.latent_dim,
+        hidden_dims=AEConfig.hidden_dims,
+    ).to(device)
+    if os.path.exists(AEConfig.pretrained_model_path):
+        ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
+    
+    ae.eval()
+    for param in ae.parameters():
+        param.requires_grad = False
+    
+    emulator = RecursiveResNet(
+        input_dim = EMConfig.input_dim,
+        hidden_dim = EMConfig.hidden_dim,
+        output_dim = EMConfig.output_dim,
+        dropout = EMConfig.dropout,
+        num_blocks=EMConfig.num_blocks,
+    ).to(device)
+    
+    if os.path.exists(EMConfig.pretrained_model_path):
+        print("Loading Pretrained Model")
+        emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path, weights_only=True))
+
+    
+    if is_inference:
+        print("Inference Mode Activated (parameters frozen)")
+        emulator.eval()
+        for param in emulator.parameters():
+            param.requires_grad = False
+    elif final_training_phase:
+        print(f"Final Training Phase Activated (batchnorm frozen)")
+        freeze_bn_layers(emulator)
+
+    optimizer = optim.AdamW(
+        emulator.parameters(),
+        lr=EMConfig.lr,
+        betas=EMConfig.betas,
+        weight_decay=EMConfig.weight_decay,
+        fused=True,
+    )
+    
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=EMConfig.lr_decay,
+        patience=EMConfig.lr_decay_patience,
+    )
+    
+    total_params = sum(p.numel() for p in emulator.parameters())
+    print(f"Total Parameters: {total_params}")
+
+    return emulator, ae, optimizer, scheduler
+
+
