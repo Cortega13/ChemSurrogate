@@ -49,16 +49,15 @@ class AEConfig:
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 1e-3
+    lr = 1e-4
     lr_decay = 0.5
     lr_decay_patience = 20
     betas = (0.9, 0.99)
     weight_decay = 1e-3
-    loss_scaling_factor = 1e-3
     exponential_coefficient = 20
     conservation_weight = 4e2
     structural_weight = 2e4
-    num_anchors = 256
+    num_anchors = 512
     batch_size = 4*8192
     stagnant_epoch_patience = 20
     gradient_clipping = 1
@@ -110,7 +109,6 @@ class PredefinedTensors:
     
     exponential = torch.log(torch.tensor(10, device=device).float())
 
-    AE_loss_scaling_factor = torch.tensor(AEConfig.loss_scaling_factor, device=device).float()
     EM_loss_scaling_factor = torch.tensor(EMConfig.loss_scaling_factor, device=device).float()
     
     AE_exponential_coefficient = torch.tensor(AEConfig.exponential_coefficient, device=device).float()

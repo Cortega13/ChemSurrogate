@@ -81,7 +81,7 @@ class Trainer:
         mean_loss = val_loss.mean().item()
         std_loss = val_loss.std().item()
         max_loss = val_loss.max().item()
-        metric = mean_loss + std_loss + 0.5*max_loss
+        metric = mean_loss# + std_loss + 0.5*max_loss
         
         if metric < self.metric_minimum_loss:
             print("**********************")

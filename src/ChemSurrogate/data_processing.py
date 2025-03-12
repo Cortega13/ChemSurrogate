@@ -437,7 +437,6 @@ def autoencoder_loss_function(
     latent_components: torch.Tensor,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
-    loss_scaling_factor: torch.Tensor = PredefinedTensors.AE_loss_scaling_factor,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
     structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
     ):
@@ -451,17 +450,16 @@ def autoencoder_loss_function(
     
     conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets)
     
-    local_structure_loss = structural_weight * calculate_structural_loss(
+    structural_loss = structural_weight * calculate_structural_loss(
         targets, 
         latent_components
         )
     
     correlation_loss = calculate_correlation_loss(latent_components)
         
-    total_loss = (elementwise_loss +  conservation_error + local_structure_loss + correlation_loss)
-    total_loss *= loss_scaling_factor
+    total_loss = (elementwise_loss +  conservation_error + structural_loss + correlation_loss)
     
-    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Local: {local_structure_loss.detach():.3e} Corr: {correlation_loss.detach():.3e}| Total: {total_loss.detach():.3e}")
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} Corr: {correlation_loss.detach():.3e}| Total: {total_loss.detach():.3e}")
     return total_loss
 
 
