@@ -26,32 +26,32 @@ if __name__ == "__main__":
     training_t = torch.from_numpy(training_np).to(torch.float32)
     validation_t = torch.from_numpy(validation_np).to(torch.float32)
     
-    # training_Dataset = dp.AutoencoderDataset(training_t)
-    # validation_Dataset = dp.AutoencoderDataset(validation_t)
+    training_Dataset = dp.AutoencoderDataset(training_t)
+    validation_Dataset = dp.AutoencoderDataset(validation_t)
     
-    # del training_np, validation_np, training_t, validation_t
-    # gc.collect()
+    del training_np, validation_np, training_t, validation_t
+    gc.collect()
     
-    # training_dataloader = dp.tensor_to_dataloader(AEConfig, training_Dataset, is_emulator=False)
-    # validation_dataloader = dp.tensor_to_dataloader(AEConfig, validation_Dataset, is_emulator=False)
+    training_dataloader = dp.tensor_to_dataloader(AEConfig, training_Dataset, is_emulator=False)
+    validation_dataloader = dp.tensor_to_dataloader(AEConfig, validation_Dataset, is_emulator=False)
     
-    # autoencoder, optimizer, scheduler = load_autoencoder_objects(final_training_phase=True)
+    autoencoder, optimizer, scheduler = load_autoencoder_objects(final_training_phase=False)
     
-    # autoencoder_trainer = AutoencoderTrainer(
-    #     autoencoder,
-    #     optimizer,
-    #     scheduler,
-    #     training_dataloader,
-    #     validation_dataloader
-    #     )
+    autoencoder_trainer = AutoencoderTrainer(
+        autoencoder,
+        optimizer,
+        scheduler,
+        training_dataloader,
+        validation_dataloader
+        )
     
-    # autoencoder_trainer.train()
+    autoencoder_trainer.train()
     
-    total_dataset = torch.vstack((training_t, validation_t))
-    del training_np, validation_np
+    # total_dataset = torch.vstack((training_t, validation_t))
+    # del training_np, validation_np
     
-    component_scalers = dp.calculate_component_scalers(total_dataset)
-    print(f"Component Scalers (Min-Max of Latent Space): {component_scalers}")
+    # component_scalers = dp.calculate_component_scalers(total_dataset)
+    # print(f"Component Scalers (Min-Max of Latent Space): {component_scalers}")
     
-    component_scalers_path = DatasetConfig.working_path + "/utils/component_scalers.npy"
-    np.save(component_scalers_path, component_scalers)
+    # component_scalers_path = DatasetConfig.working_path + "/utils/component_scalers.npy"
+    # np.save(component_scalers_path, component_scalers)

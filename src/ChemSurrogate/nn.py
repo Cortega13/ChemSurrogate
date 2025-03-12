@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 class Autoencoder(nn.Module):
     def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.0, dropout=0.0):
@@ -10,7 +9,6 @@ class Autoencoder(nn.Module):
             nn.Linear(input_dim, hidden_dims[0], bias=False),
             nn.BatchNorm1d(hidden_dims[0]),
             nn.GELU(),
-            nn.Dropout(dropout),
             
             nn.Linear(hidden_dims[0], hidden_dims[1], bias=False),
             nn.BatchNorm1d(hidden_dims[1]),
@@ -26,7 +24,6 @@ class Autoencoder(nn.Module):
             nn.Linear(latent_dim, hidden_dims[1], bias=False),
             nn.BatchNorm1d(hidden_dims[1]),
             nn.GELU(),
-            nn.Dropout(dropout),
             
             nn.Linear(hidden_dims[1], hidden_dims[0], bias=False),
             nn.BatchNorm1d(hidden_dims[0]),

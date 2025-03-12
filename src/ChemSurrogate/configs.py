@@ -49,20 +49,21 @@ class AEConfig:
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 5e-5
+    lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 20
     betas = (0.9, 0.99)
     weight_decay = 1e-3
-    loss_scaling_factor = 1e-1
-    exponential_coefficient = 24
+    loss_scaling_factor = 1e-3
+    exponential_coefficient = 20
     conservation_weight = 4e2
-    structural_weight = 4e3
+    structural_weight = 2e4
+    num_anchors = 256
     batch_size = 4*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 2
+    gradient_clipping = 1
     dropout = 0.0
-    noise = 0.05
+    noise = 0.1
     save_model = True
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
@@ -78,15 +79,15 @@ class EMConfig:
     num_blocks = 2
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-3
     lr_decay = 0.6
     lr_decay_patience = 10
     betas = (0.99, 0.999)
     weight_decay = 1e-2
-    loss_scaling_factor = 1e-2
+    loss_scaling_factor = 1e-3                # I realize adamw doesn't care about loss scaling, but for whatever reason, this works.
     exponential_coefficient = 20
     alpha = 3e3
-    batch_size = 12*8192
+    batch_size = 4*8192
     stagnant_epoch_patience = 20
     gradient_clipping = 10
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")

@@ -379,7 +379,7 @@ def calculate_conservation_loss(
 def calculate_structural_loss(
     targets: torch.Tensor,
     latent_components: torch.Tensor,
-    num_anchors: int = 3*64,
+    num_anchors: int = AEConfig.num_anchors,
     eps: torch.Tensor = torch.tensor(1e-8).to("cuda").float(),
     device: torch.device = device,
 ):
@@ -409,7 +409,28 @@ def calculate_structural_loss(
     return torch.mean((target_dists_normalized - latent_dists_normalized) ** 2)
 
 
+# @torch.jit.script
+# def calculate_anticorrelation_loss(
+#     latent_components,
+#     anticorrelation_weight: torch.Tensor = torch.tensor(1e3).to("cuda").float(),
+#     ):
+#     corr_matrix = torch.corrcoef(latent_components.T)
+#     neg_corr = torch.relu(-corr_matrix)
+#     anticorrelation_error = anticorrelation_weight * torch.sum(neg_corr**2)
+#     return anticorrelation_error
+
 @torch.jit.script
+def calculate_correlation_loss(
+    latent_components,
+    disentanglement_weight: torch.Tensor = torch.tensor(1e3).to("cuda").float(),
+    ):
+    corr_matrix = torch.corrcoef(latent_components.T)
+    num_dimensions = latent_components.size(1)
+    disentanglement_error = disentanglement_weight * (torch.sum(corr_matrix**2) - num_dimensions)
+    return disentanglement_error
+
+
+#@torch.jit.script
 def autoencoder_loss_function(
     outputs: torch.Tensor, 
     targets: torch.Tensor,
@@ -434,15 +455,17 @@ def autoencoder_loss_function(
         targets, 
         latent_components
         )
+    
+    correlation_loss = calculate_correlation_loss(latent_components)
         
-    total_loss = (elementwise_loss +  conservation_error + local_structure_loss)
+    total_loss = (elementwise_loss +  conservation_error + local_structure_loss + correlation_loss)
     total_loss *= loss_scaling_factor
     
-    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Local: {local_structure_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Local: {local_structure_loss.detach():.3e} Corr: {correlation_loss.detach():.3e}| Total: {total_loss.detach():.3e}")
     return total_loss
 
 
-@torch.jit.script
+#@torch.jit.script
 def emulator_training_loss_function(
     outputs,
     targets,
@@ -462,7 +485,7 @@ def emulator_training_loss_function(
     
     total_loss = sum_elementwise_loss + alpha*conservation_error
     total_loss = total_loss * loss_scaling_factor
-    #print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
+    print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
     return total_loss
 
 

@@ -8,6 +8,7 @@ from .nn import Autoencoder, Emulator, RecursiveResNet
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
+from torch import nn
 
 from . import data_processing as dp
 from .configs import DatasetConfig, AEConfig, EMConfig
