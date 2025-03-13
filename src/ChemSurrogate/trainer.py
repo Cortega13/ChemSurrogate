@@ -130,13 +130,21 @@ class AutoencoderTrainer(Trainer):
         )
 
 
-    def _run_training_batch(self, features):
+    def _run_training_batch(self, features, featuresT1):
         """
         Runs a training batch where features = targets since this is an autoencoder.
         """
         self.optimizer.zero_grad()
         outputs, z = self.model(features)
-        loss = dp.autoencoder_loss_function(outputs, features, z)
+        outputsT1, _ = self.model(featuresT1)
+        loss = dp.autoencoder_loss_function(
+            outputs,
+            outputsT1,
+            features[:, 4:],
+            features,
+            z,
+            self.model
+            )
                 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), AEConfig.gradient_clipping)
@@ -148,6 +156,7 @@ class AutoencoderTrainer(Trainer):
         Runs a validation batch where features = targets since this is an autoencoder.
         """
         component_outputs = self.model.encode(features)
+        features = features[:, 4:]
         outputs = self.model.decode(component_outputs)
 
         loss = dp.validation_loss_function(outputs, features)
@@ -162,15 +171,16 @@ class AutoencoderTrainer(Trainer):
         
         tic1 = datetime.now()
         self.model.train()
-        for features in self.training_dataloader:
-            features = features[0].to(device, non_blocking=True)
-            self._run_training_batch(features)
+        for features, featuresT1 in self.training_dataloader:
+            features = features.to(device, non_blocking=True)
+            featuresT1 = featuresT1.to(device, non_blocking=True)
+            self._run_training_batch(features, featuresT1)
 
         tic2 = datetime.now()
         self.model.eval()
         with torch.no_grad():
-            for features in self.validation_dataloader:
-                features = features[0].to(device, non_blocking=True)
+            for features, featuresT1 in self.validation_dataloader:
+                features = features.to(device, non_blocking=True)
                 self._run_validation_batch(features)
 
         toc = datetime.now()

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.0, dropout=0.0):
+    def __init__(self, input_dim=337, output_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.0, dropout=0.0):
         super(Autoencoder, self).__init__()
         
         self.encoder = nn.Sequential(
@@ -30,7 +30,7 @@ class Autoencoder(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             
-            nn.Linear(hidden_dims[0], input_dim),
+            nn.Linear(hidden_dims[0], output_dim),
             nn.Sigmoid(),
         )
         

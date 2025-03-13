@@ -10,6 +10,7 @@ from .nn import Autoencoder
 from .configs import DatasetConfig, AEConfig, EMConfig, PredefinedTensors
 import h5py
 from torch.utils.data import Sampler
+from torch.nn import functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -409,36 +410,37 @@ def calculate_structural_loss(
     return torch.mean((target_dists_normalized - latent_dists_normalized) ** 2)
 
 
-# @torch.jit.script
-# def calculate_anticorrelation_loss(
-#     latent_components,
-#     anticorrelation_weight: torch.Tensor = torch.tensor(1e3).to("cuda").float(),
-#     ):
-#     corr_matrix = torch.corrcoef(latent_components.T)
-#     neg_corr = torch.relu(-corr_matrix)
-#     anticorrelation_error = anticorrelation_weight * torch.sum(neg_corr**2)
-#     return anticorrelation_error
-
 @torch.jit.script
 def calculate_correlation_loss(
     latent_components,
-    disentanglement_weight: torch.Tensor = torch.tensor(1e3).to("cuda").float(),
     ):
     corr_matrix = torch.corrcoef(latent_components.T)
     num_dimensions = latent_components.size(1)
-    disentanglement_error = disentanglement_weight * (torch.sum(corr_matrix**2) - num_dimensions)
-    return disentanglement_error
+    return (torch.sum(corr_matrix**2) - num_dimensions)
+
+
+@torch.jit.script
+def temporal_smoothness_loss(outputs, outputsT1):
+    """
+    Temporal smoothness loss. Compares the predicted abundances at time t and t+1.
+    """
+    return F.mse_loss(outputs, outputsT1)
 
 
 #@torch.jit.script
 def autoencoder_loss_function(
-    outputs: torch.Tensor, 
+    outputs: torch.Tensor,
+    outputsT1: torch.Tensor,
     targets: torch.Tensor,
+    inputs: torch.Tensor,
     latent_components: torch.Tensor,
+    model: torch.nn.Module,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
     structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
+    temporal_weight: torch.Tensor = PredefinedTensors.AE_temporal_weight,
+    AE_correlation_weight: torch.Tensor = PredefinedTensors.AE_correlation_weight,
     ):
     """
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
@@ -455,11 +457,14 @@ def autoencoder_loss_function(
         latent_components
         )
     
-    correlation_loss = calculate_correlation_loss(latent_components)
-        
-    total_loss = (elementwise_loss +  conservation_error + structural_loss + correlation_loss)
+    correlation_loss = AE_correlation_weight * calculate_correlation_loss(latent_components)
     
-    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} Corr: {correlation_loss.detach():.3e}| Total: {total_loss.detach():.3e}")
+    temporal_loss = temporal_weight * temporal_smoothness_loss(outputs, outputsT1)
+    
+        
+    total_loss = (elementwise_loss +  conservation_error + structural_loss + correlation_loss + temporal_loss)
+    
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} Corr: {correlation_loss.detach():.3e}| Temporal: {temporal_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
@@ -570,6 +575,46 @@ class RowRetrievalDataset(Dataset):
         return features, targets
 
 
+class AutoencoderRowRetrievalDataset(Dataset):
+    def __init__(
+        self,
+        data_matrix: torch.Tensor,
+        index_pairs: torch.Tensor,
+    ):
+        self.data_matrix = data_matrix
+        self.index_pairs = index_pairs
+        self.num_species = DatasetConfig.num_species
+        self.num_metadata = DatasetConfig.num_metadata
+
+        data_matrix_size = self.data_matrix.nbytes / (1024 ** 2)
+        index_pairs_size = self.index_pairs.nbytes / (1024 ** 2)
+
+        print(f"Data_matrix Memory usage: {data_matrix_size:.3f} MB")
+        print(f"Index_pairs Memory usage: {index_pairs_size:.2f} MB\n")
+        
+        print(f"Dataset Size: {len(self.data_matrix)} | Index Pairs: {len(self.index_pairs)}\n")
+
+
+    def __len__(self):
+        return len(self.index_pairs)
+
+
+    def __getitems__(
+        self,
+        indices: list
+        ):
+        
+        indices = torch.tensor(indices, dtype=torch.long)
+        pairs = self.index_pairs[indices]
+        rows = self.data_matrix[pairs]
+        
+        rows = rows[:, :, self.num_metadata:]
+        
+        features = rows[:, 0, :]
+        featuresT1 = rows[:, 1, :]
+        return features, featuresT1
+
+
 class ChunkedShuffleSampler(Sampler):
     """
     Shuffle data in chunks so that we don't create a huge random permutation
@@ -620,6 +665,44 @@ class ChunkedShuffleSampler(Sampler):
     def __len__(self):
         return self.data_size
 
+
+@njit
+def calculate_autoencoder_index_pairs(
+    dataset_np: np.ndarray
+    ):
+    """
+    Given the dataset, this function calculates consecutive timestep pairs
+    for the emulator training (one timestep apart).
+    Format: (time1, time2)
+    Example Pairs:
+    (0, 1)
+    (1, 2)
+    (2, 3)
+    """
+    change_indices = np.where(np.diff(dataset_np[:, 1].astype(np.int32)) != 0)[0] + 1
+    model_groups = np.split(dataset_np, change_indices)
+    
+    total_pairs = 0
+    for group in model_groups:
+        n = len(group[:, 0])
+        total_pairs += max(0, n)
+    
+    index_pairs = np.zeros((total_pairs, 2), dtype=np.int32)
+    
+    index = 0
+    for group in model_groups:
+        sub_array = group[:, 0]
+        n = len(sub_array)
+        
+        for i in prange(n):
+            index_pairs[index, 0] = sub_array[i]
+            if i + 1 < n:
+                index_pairs[index, 1] = sub_array[i + 1]
+            else:
+                index_pairs[index, 1] = sub_array[i]
+            index += 1
+    
+    return index_pairs
 
 @njit
 def calculate_emulator_index_pairs(
@@ -769,7 +852,6 @@ def prepare_emulator_dataset(
     num_metadata = DatasetConfig.num_metadata
     
     dataset_np[:, 0] = np.arange(len(dataset_np))
-    
     physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
     abundances_scaling(dataset_np[:, -num_species:])
     
@@ -791,6 +873,25 @@ def prepare_emulator_dataset(
     torch.cuda.empty_cache()
     
     return (encoded_t, index_pairs_shuffled_t)
+
+
+def prepare_autoencoder_dataset(dataset_np: np.array):
+    num_species = DatasetConfig.num_species
+    num_params = DatasetConfig.num_physical_parameters
+    num_metadata = DatasetConfig.num_metadata
+    
+    dataset_np[:, 0] = np.arange(len(dataset_np))
+    physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
+    abundances_scaling(dataset_np[:, -num_species:])
+    
+    index_pairs_np = calculate_autoencoder_index_pairs(dataset_np)
+    perm = np.random.permutation(len(index_pairs_np))
+    index_pairs_shuffled_np = index_pairs_np[perm]
+    
+    dataset_t = torch.from_numpy(dataset_np).float()
+    index_pairs_shuffled_t = torch.from_numpy(index_pairs_shuffled_np).int()
+    
+    return (dataset_t, index_pairs_shuffled_t)
 
 
 def save_tensors_to_hdf5(

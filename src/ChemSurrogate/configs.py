@@ -40,27 +40,30 @@ class DatasetConfig:
     validation_dataset_path = os.path.join(working_path, "data/uclchem_validation.h5")
 
 class AEConfig:
-    columns = DatasetConfig.species
+    columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
-    input_dim = DatasetConfig.num_species # input_dim = output_dim
+    input_dim = DatasetConfig.num_physical_parameters + DatasetConfig.num_species
+    output_dim = DatasetConfig.num_species
     hidden_dims = (320, 160)
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-2
     lr_decay = 0.5
-    lr_decay_patience = 20
-    betas = (0.9, 0.99)
+    lr_decay_patience = 10
+    betas = (0.99, 0.999)
     weight_decay = 1e-3
     exponential_coefficient = 20
-    conservation_weight = 4e2
-    structural_weight = 2e4
+    correlation_weight = 1
+    conservation_weight = 1
+    temporal_weight = 1
+    structural_weight = 1
     num_anchors = 512
     batch_size = 4*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 1
+    gradient_clipping = 5
     dropout = 0.0
     noise = 0.1
     save_model = True
@@ -116,6 +119,8 @@ class PredefinedTensors:
     
     AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
     AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
+    AE_temporal_weight = torch.tensor(AEConfig.temporal_weight, device=device).float()
+    AE_correlation_weight = torch.tensor(AEConfig.correlation_weight, device=device).float()
     
     EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
     

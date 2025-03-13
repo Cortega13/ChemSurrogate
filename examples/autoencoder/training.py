@@ -18,25 +18,25 @@ if __name__ == "__main__":
     # np.save(conservation_matrix_path, conservation_matrix)
     # print(f"Stochiometry Matrix: {conservation_matrix}")
     
-    training_np, validation_np = dp.load_datasets(AEConfig.columns)
+    # training_np, validation_np = dp.load_datasets(AEConfig.columns)
+    # training_dataset = dp.prepare_autoencoder_dataset(training_np)
+    # validation_dataset = dp.prepare_autoencoder_dataset(validation_np)
+    # dp.save_tensors_to_hdf5(training_dataset, category="training_ae")
+    # dp.save_tensors_to_hdf5(validation_dataset, category="validation_ae")
+    
+    training_dataset, training_indices = dp.load_tensors_from_hdf5(category="training_ae")
+    validation_dataset, validation_indices = dp.load_tensors_from_hdf5(category="validation_ae")
 
-    dp.abundances_scaling(training_np)
-    dp.abundances_scaling(validation_np)
-    
-    training_t = torch.from_numpy(training_np).to(torch.float32)
-    validation_t = torch.from_numpy(validation_np).to(torch.float32)
-    
-    training_Dataset = dp.AutoencoderDataset(training_t)
-    validation_Dataset = dp.AutoencoderDataset(validation_t)
-    
-    del training_np, validation_np, training_t, validation_t
+    training_Dataset = dp.AutoencoderRowRetrievalDataset(training_dataset, training_indices)
+    validation_Dataset = dp.AutoencoderRowRetrievalDataset(validation_dataset, validation_indices)
+    del training_dataset, validation_dataset, training_indices, validation_indices
     gc.collect()
-    
+
     training_dataloader = dp.tensor_to_dataloader(AEConfig, training_Dataset, is_emulator=False)
     validation_dataloader = dp.tensor_to_dataloader(AEConfig, validation_Dataset, is_emulator=False)
-    
+
     autoencoder, optimizer, scheduler = load_autoencoder_objects(final_training_phase=False)
-    
+
     autoencoder_trainer = AutoencoderTrainer(
         autoencoder,
         optimizer,
