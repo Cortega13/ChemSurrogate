@@ -140,12 +140,11 @@ class AutoencoderTrainer(Trainer):
         loss = dp.autoencoder_loss_function(
             outputs,
             outputsT1,
-            features[:, 4:],
             features,
             z,
             self.model
             )
-                
+
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), AEConfig.gradient_clipping)
         self.optimizer.step()

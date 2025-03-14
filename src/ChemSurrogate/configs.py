@@ -40,7 +40,7 @@ class DatasetConfig:
     validation_dataset_path = os.path.join(working_path, "data/uclchem_validation.h5")
 
 class AEConfig:
-    columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
+    columns = DatasetConfig.species
     num_columns = len(columns)
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
@@ -50,22 +50,23 @@ class AEConfig:
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 1e-2
+    lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 10
     betas = (0.99, 0.999)
     weight_decay = 1e-3
     exponential_coefficient = 20
-    correlation_weight = 1
-    conservation_weight = 1
-    temporal_weight = 1
-    structural_weight = 1
+    smoothness_weight = 5e-1
+    conservation_weight = 1e2
+    temporal_weight = 5e5
+    structural_weight = 0
     num_anchors = 512
     batch_size = 4*8192
     stagnant_epoch_patience = 20
     gradient_clipping = 5
     dropout = 0.0
     noise = 0.1
+    shuffle_chunk_size = 1
     save_model = True
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
@@ -75,7 +76,7 @@ class EMConfig:
     columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     # Model Config
-    input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim + 1 # The 1 is for the time input.
+    input_dim = 1 + DatasetConfig.num_physical_parameters + AEConfig.latent_dim # The 1 is for the time input.
     hidden_dim = 256
     output_dim = AEConfig.latent_dim
     num_blocks = 2
@@ -85,8 +86,8 @@ class EMConfig:
     lr_decay = 0.6
     lr_decay_patience = 10
     betas = (0.99, 0.999)
-    weight_decay = 1e-2
-    loss_scaling_factor = 1e-3                # I realize adamw doesn't care about loss scaling, but for whatever reason, this works.
+    weight_decay = 1e-3
+    loss_scaling_factor = 1e-3
     exponential_coefficient = 20
     alpha = 3e3
     batch_size = 4*8192
@@ -94,9 +95,10 @@ class EMConfig:
     gradient_clipping = 10
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.01
+    dropout = 0.2
     save_model = True
     shuffle = True
+    shuffle_chunk_size = 0.02
 
 
 class PredefinedTensors:
@@ -120,7 +122,7 @@ class PredefinedTensors:
     AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
     AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
     AE_temporal_weight = torch.tensor(AEConfig.temporal_weight, device=device).float()
-    AE_correlation_weight = torch.tensor(AEConfig.correlation_weight, device=device).float()
+    AE_smoothness_weight = torch.tensor(AEConfig.smoothness_weight, device=device).float()
     
     EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
     
