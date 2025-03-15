@@ -142,7 +142,6 @@ class AutoencoderTrainer(Trainer):
             outputsT1,
             features,
             z,
-            self.model
             )
 
         loss.backward()
@@ -155,7 +154,6 @@ class AutoencoderTrainer(Trainer):
         Runs a validation batch where features = targets since this is an autoencoder.
         """
         component_outputs = self.model.encode(features)
-        features = features[:, 4:]
         outputs = self.model.decode(component_outputs)
 
         loss = dp.validation_loss_function(outputs, features)

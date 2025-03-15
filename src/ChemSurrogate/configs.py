@@ -40,11 +40,11 @@ class DatasetConfig:
     validation_dataset_path = os.path.join(working_path, "data/uclchem_validation.h5")
 
 class AEConfig:
-    columns = DatasetConfig.species
+    columns = DatasetConfig.metadata + DatasetConfig.species
     num_columns = len(columns)
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
-    input_dim = DatasetConfig.num_physical_parameters + DatasetConfig.num_species
+    input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
     hidden_dims = (320, 160)
     latent_dim = 12
@@ -56,15 +56,14 @@ class AEConfig:
     betas = (0.99, 0.999)
     weight_decay = 1e-3
     exponential_coefficient = 20
-    smoothness_weight = 5e-1
     conservation_weight = 1e2
-    temporal_weight = 5e5
-    structural_weight = 0
+    temporal_weight = 1e5
+    structural_weight = 1e4
     num_anchors = 512
     batch_size = 4*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 5
-    dropout = 0.0
+    gradient_clipping = 1
+    dropout = 0.3
     noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
@@ -82,20 +81,20 @@ class EMConfig:
     num_blocks = 2
     
     # Hyperparameters Config
-    lr = 1e-3
-    lr_decay = 0.6
+    lr = 1e-4
+    lr_decay = 0.5
     lr_decay_patience = 10
-    betas = (0.99, 0.999)
-    weight_decay = 1e-3
-    loss_scaling_factor = 1e-3
+    betas = (0.995, 0.9999)
+    weight_decay = 1e-2
+    loss_scaling_factor = 1e-2
     exponential_coefficient = 20
     alpha = 3e3
-    batch_size = 4*8192
+    batch_size = 12*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 10
+    gradient_clipping = 5
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.2
+    dropout = 0.0
     save_model = True
     shuffle = True
     shuffle_chunk_size = 0.02
@@ -122,7 +121,6 @@ class PredefinedTensors:
     AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
     AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
     AE_temporal_weight = torch.tensor(AEConfig.temporal_weight, device=device).float()
-    AE_smoothness_weight = torch.tensor(AEConfig.smoothness_weight, device=device).float()
     
     EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
     

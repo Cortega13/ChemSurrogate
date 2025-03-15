@@ -186,7 +186,7 @@ def scatter_abundances_vs_physical_parameters(
             ax.set_ylabel(f"Log {varying_param}")
             ax.set_title(f"Log {varying_param} vs. Log {species}")
             ax.grid(True)
-            ax.set_ylim(-20, 0)
+            #ax.set_ylim(-20, 0)
 
             channel_info = (
                 f"R = {other_params[0]} "

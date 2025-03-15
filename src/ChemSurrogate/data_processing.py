@@ -421,7 +421,6 @@ def autoencoder_loss_function(
     outputsT1: torch.Tensor,
     targets: torch.Tensor,
     latent_components: torch.Tensor,
-    model: Autoencoder,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
@@ -432,55 +431,27 @@ def autoencoder_loss_function(
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
     """
     
-    elementwise_loss = torch.abs(outputs - targets[:, 4:])
+    elementwise_loss = torch.abs(outputs - targets)
     elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss) - 1
-    elementwise_loss = torch.sum(elementwise_loss) / targets[:, 4:].size(0)
+    elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
     
-    conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets[:, 4:])
+    conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets)
     
     structural_loss = structural_weight * calculate_structural_loss(
-        targets[:, 4:], 
+        targets, 
         latent_components
         )
         
     temporal_loss = temporal_weight * temporal_smoothness_loss(outputs, outputsT1)
+
     
-    smooth_loss = smoothness_loss(
-            model,
-            targets,
-            outputs
-            )
+    total_loss = (elementwise_loss +  conservation_error + structural_loss + temporal_loss)
     
-    total_loss = (elementwise_loss +  conservation_error + structural_loss + temporal_loss + smooth_loss)
-    
-    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} | Temporal: {temporal_loss.detach():.3e} | Smooth: {smooth_loss.detach():.3e}| Total: {total_loss.detach():.3e}")
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} | Temporal: {temporal_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
-def smoothness_loss(
-    model,
-    input_data: torch.Tensor,
-    latent_vectors: torch.Tensor,
-    weight: torch.Tensor = PredefinedTensors.AE_smoothness_weight,
-):
-    if not input_data.requires_grad:
-        input_data = input_data.detach().clone().requires_grad_(True)
-        latent_vectors = model.encode(input_data)
-    
-    gradients = torch.autograd.grad(
-        outputs=latent_vectors,
-        inputs=input_data,
-        grad_outputs=torch.ones_like(latent_vectors),
-        create_graph=True,
-        retain_graph=True,
-        only_inputs=True
-    )[0]
-    jacobian_norm = torch.sum(gradients**2)
-    
-    return weight * jacobian_norm
-
-
-#@torch.jit.script
+@torch.jit.script
 def emulator_training_loss_function(
     outputs,
     targets,
@@ -500,7 +471,7 @@ def emulator_training_loss_function(
     
     total_loss = sum_elementwise_loss + alpha*conservation_error
     total_loss = total_loss * loss_scaling_factor
-    print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
+    #print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
     return total_loss
 
 
@@ -589,22 +560,21 @@ class EmulatorSequenceDataset(Dataset):
         print(f"Data_matrix Memory usage: {data_matrix_size:.3f} MB")
         
         print(f"Dataset Size: {len(self.data_matrix)}\n")
-    
+
+
     def __len__(self):
         return len(self.model_nums)
-    
+
+
     def __getitems__(
         self,
         indices: list
         ):
         
         indices = torch.tensor(indices, dtype=torch.long)
-        model_nums = torch.index_select(self.model_nums, 0, indices)
+        pairs = self.index_pairs[indices]
+        rows = self.data_matrix[pairs[:, :-1]]
         
-        model_column = self.data_matrix[:, 1]
-        mask = torch.isin(model_column, model_nums)
-        rows = self.data_matrix[mask]
-                
         features = rows[:, 0, :]
         targets = rows[:, 1, :]
         
@@ -613,8 +583,7 @@ class EmulatorSequenceDataset(Dataset):
         physical_parameters = features[:, left_index:right_index]
         encoded_components = features[:, -self.num_components:]
         
-        timesteps = (features[:, 1].unsqueeze(1).float() / self.num_timesteps).float()
-        features = torch.cat((timesteps, physical_parameters, encoded_components), dim=1)
+        features = torch.cat((physical_parameters, encoded_components), dim=1)
         
         left_index = self.num_metadata + self.num_physical_parameters
         right_index = left_index + self.num_species
@@ -790,6 +759,43 @@ def calculate_emulator_index_pairs(
     return index_pairs
 
 
+@njit
+def calculate_emulator_index_pairs_sequential(
+    dataset_np: np.ndarray
+    ):
+    """
+    Returns a 2D array with sequences padded with -1 values.
+    For each model with indices [0,1,2,...,n]:
+    - First sequence: [0,1,2,...,n]
+    - Second sequence: [1,2,3,...,n]
+    - And so on, with the last sequence being [n-1, n]
+    Padding value of -1 indicates end of valid data.
+    """
+    change_indices = np.where(np.diff(dataset_np[:, 1].astype(np.int32)) != 0)[0] + 1
+    model_groups = np.split(dataset_np, change_indices)
+    
+    total_seqs = 0
+    max_seq_len = 0
+    for group in model_groups:
+        n = len(group)
+        total_seqs += n - 1
+        max_seq_len = max(max_seq_len, n)
+    
+    sequences = np.full((total_seqs, max_seq_len), -1, dtype=np.int32)
+    
+    seq_idx = 0
+    for group in model_groups:
+        indices = group[:, 0]
+        n = len(indices)
+        
+        for start_idx in range(n-1):
+            seq_len = n - start_idx
+            sequences[seq_idx, :seq_len] = indices[start_idx:]
+            seq_idx += 1
+    
+    return sequences
+
+
 def physical_parameter_scaling(
     physical_parameters: np.ndarray
     ):
@@ -852,6 +858,7 @@ def encode_dataset(
 
 def prepare_emulator_dataset(
     dataset_np: np.array, 
+    sequential_time: bool = False
     ):
     """
     Generates index pairs for training.
@@ -863,13 +870,17 @@ def prepare_emulator_dataset(
     num_metadata = DatasetConfig.num_metadata
     
     dataset_np[:, 0] = np.arange(len(dataset_np))
+    
     physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
     abundances_scaling(dataset_np[:, -num_species:])
     
-    latent_components = encode_dataset(dataset_np[:, num_metadata:])
+    latent_components = encode_dataset(dataset_np[:, -num_species:])
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
     
-    index_pairs_np = calculate_emulator_index_pairs(encoded_dataset_np)
+    if sequential_time:
+        index_pairs_np = calculate_emulator_index_pairs(encoded_dataset_np)
+    else:
+        index_pairs_np = calculate_emulator_index_pairs_sequential(encoded_dataset_np)
     
     perm = np.random.permutation(len(index_pairs_np))
     index_pairs_shuffled_np = index_pairs_np[perm]
@@ -886,11 +897,10 @@ def prepare_emulator_dataset(
 def prepare_autoencoder_dataset(
     dataset_np: np.array
     ):
-    num_species = DatasetConfig.num_species
-    num_params = DatasetConfig.num_physical_parameters
     num_metadata = DatasetConfig.num_metadata
     
-    abundances_scaling(dataset_np)
+    dataset_np[:, 0] = np.arange(len(dataset_np))
+    abundances_scaling(dataset_np[:, num_metadata:])
     
     index_pairs_np = calculate_autoencoder_index_pairs(dataset_np)
     perm = np.random.permutation(len(index_pairs_np))
