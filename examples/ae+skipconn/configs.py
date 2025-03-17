@@ -11,7 +11,7 @@ class DatasetConfig:
     working_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # The path to the root folder of the project.
     num_training_models =   60_000    # Each model has a different set of initial physical parameters. They all begin with identical initial abundances.
     num_validation_models = 20_000  
-    num_timesteps_per_model = 101   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
+    num_timesteps_per_model = 100   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
     timestep_duration = 1_000       # In years
     num_metadata = 3
     num_physical_parameters = 4
@@ -74,10 +74,10 @@ class EMConfig:
     columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     # Model Config
-    input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim
-    hidden_dim = 128
+    input_dim = 1 + DatasetConfig.num_physical_parameters + AEConfig.latent_dim # The 1 is for the time input.
+    hidden_dim = 256
     output_dim = AEConfig.latent_dim
-    num_blocks = 1
+    num_blocks = 2
     
     # Hyperparameters Config
     lr = 1e-4
@@ -86,14 +86,14 @@ class EMConfig:
     betas = (0.6, 0.7)
     weight_decay = 1e-2
     loss_scaling_factor = 1e-3
-    exponential_coefficient = 20
+    exponential_coefficient = 22
     alpha = 3e3
-    batch_size = 256
+    batch_size = 8*8192
     stagnant_epoch_patience = 20
     gradient_clipping = 5
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
-    dropout = 0.0
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
+    dropout = 0.1
     save_model = True
     shuffle = True
     shuffle_chunk_size = 0.005

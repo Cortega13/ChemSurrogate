@@ -132,3 +132,53 @@ class RecursiveResNet(nn.Module):
         return x
 
 
+class ResidualBlockSequential(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.RMSNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.RMSNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.RMSNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, output_dim),
+        )
+        
+    def forward(self, x):
+        return x[:, 4:] + self.net(x)
+
+
+class IterativeResNet(nn.Module):
+    def __init__(self, input_dim=17, hidden_dim=64, output_dim=12, num_blocks=2, dropout=0.0):
+        super().__init__()
+        
+        self.blocks = nn.ModuleList([
+            ResidualBlockSequential(
+                input_dim=input_dim,
+                hidden_dim=hidden_dim,
+                output_dim=output_dim,
+                dropout=dropout
+            ) for _ in range(num_blocks)
+        ])
+        
+    def forward(self, x, timesteps):
+        params = x[:, :4]
+        x = x[:, 4:]
+        
+        outputs = []
+        for _ in range(timesteps):
+            for block in self.blocks:
+                x = torch.cat([params, x], dim=1)
+                x = block(x)
+            outputs.append(x)
+        return torch.stack(outputs, dim=1)
