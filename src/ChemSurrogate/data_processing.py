@@ -409,16 +409,21 @@ def calculate_structural_loss(
     
     return torch.mean((target_dists_normalized - latent_dists_normalized) ** 2)
 
+@torch.jit.script
+def temporal_smoothness_loss(outputs, outputsT1):
+    return F.mse_loss(outputs, outputsT1)
 
 @torch.jit.script
 def autoencoder_loss_function(
     outputs: torch.Tensor,
+    outputsT1: torch.Tensor,
     targets: torch.Tensor,
     latent_components: torch.Tensor,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
     structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
+    temporal_weight: torch.Tensor = PredefinedTensors.AE_temporal_weight,
     ):
     """
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
@@ -435,13 +440,15 @@ def autoencoder_loss_function(
         latent_components
         )
     
-    total_loss = (elementwise_loss +  conservation_error + structural_loss)
+    temporal_loss = temporal_weight * temporal_smoothness_loss(outputs, outputsT1)
     
-    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
+    total_loss = (elementwise_loss +  conservation_error + structural_loss + temporal_loss)
+    
+    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e}  Temporal: {temporal_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
-#@torch.jit.script
+@torch.jit.script
 def emulator_training_loss_function(
     outputs,
     targets,
@@ -461,7 +468,7 @@ def emulator_training_loss_function(
     
     total_loss = sum_elementwise_loss + alpha*conservation_error
     total_loss = total_loss * loss_scaling_factor
-    print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
+    #print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
     return total_loss
 
 
@@ -569,7 +576,7 @@ class EmulatorSequenceDataset(Dataset):
         target_indices = torch.cat(target_indices)
         left_index = self.num_metadata + self.num_physical_parameters
         right_index = left_index + self.num_species
-        targets = self.data_matrix[:, left_index:right_index][target_indices].reshape(len(indices), self.num_timesteps - 1, -1)
+        targets = self.data_matrix[:, left_index:right_index][target_indices].reshape(len(indices), self.num_timesteps - 1, -1)[:, 10:30, :]
         
         return features, targets
 
@@ -578,26 +585,40 @@ class AutoencoderDataset(Dataset):
     def __init__(
         self,
         data_matrix: torch.Tensor,
+        index_pairs: torch.Tensor,
     ):
         self.data_matrix = data_matrix
-        
+        self.index_pairs = index_pairs
+        self.num_species = DatasetConfig.num_species
+        self.num_metadata = DatasetConfig.num_metadata
+
         data_matrix_size = self.data_matrix.nbytes / (1024 ** 2)
+        index_pairs_size = self.index_pairs.nbytes / (1024 ** 2)
 
         print(f"Data_matrix Memory usage: {data_matrix_size:.3f} MB")
-        print(f"Dataset Size: {len(self.data_matrix)}\n")
+        print(f"Index_pairs Memory usage: {index_pairs_size:.2f} MB\n")
+        
+        print(f"Dataset Size: {len(self.data_matrix)} | Index Pairs: {len(self.index_pairs)}\n")
 
 
     def __len__(self):
-        return len(self.data_matrix)
+        return len(self.index_pairs)
 
 
     def __getitems__(
         self,
         indices: list
         ):
+        
         indices = torch.tensor(indices, dtype=torch.long)
-        features = self.data_matrix[indices]
-        return features, 1
+        pairs = self.index_pairs[indices]
+        rows = self.data_matrix[pairs]
+        
+        rows = rows[:, :, self.num_metadata:]
+                
+        features = rows[:, 0, :]
+        featuresT1 = rows[:, 1, :]
+        return features, featuresT1
 
 
 class ChunkedShuffleSampler(Sampler):
@@ -610,7 +631,7 @@ class ChunkedShuffleSampler(Sampler):
         self,
         data_size: int,
         chunk_size: int,
-        seed: int = 42
+        seed: int = 13
     ):
         super().__init__()
         self.data_size = int(data_size)
@@ -650,6 +671,43 @@ class ChunkedShuffleSampler(Sampler):
     def __len__(self):
         return self.data_size
 
+@njit
+def calculate_autoencoder_index_pairs(
+    dataset_np: np.ndarray
+    ):
+    """
+    Given the dataset, this function calculates consecutive timestep pairs
+    for the emulator training (one timestep apart).
+    Format: (time1, time2)
+    Example Pairs:
+    (0, 1)
+    (1, 2)
+    (2, 3)
+    """
+    change_indices = np.where(np.diff(dataset_np[:, 1].astype(np.int32)) != 0)[0] + 1
+    model_groups = np.split(dataset_np, change_indices)
+    
+    total_pairs = 0
+    for group in model_groups:
+        n = len(group[:, 0])
+        total_pairs += max(0, n)
+    
+    index_pairs = np.zeros((total_pairs, 2), dtype=np.int32)
+    
+    index = 0
+    for group in model_groups:
+        sub_array = group[:, 0]
+        n = len(sub_array)
+        
+        for i in prange(n):
+            index_pairs[index, 0] = sub_array[i]
+            if i + 1 < n:
+                index_pairs[index, 1] = sub_array[i + 1]
+            else:
+                index_pairs[index, 1] = sub_array[i]
+            index += 1
+    
+    return index_pairs
 
 @njit
 def calculate_emulator_index_pairs(
@@ -686,7 +744,6 @@ def calculate_emulator_index_pairs(
                 index_pairs[index, 2] = timestep
                 index += 1
     return index_pairs
-
 
 @njit
 def calculate_emulator_index_pairs_sequential(
@@ -760,7 +817,7 @@ def inverse_physical_parameter_scaling(
 
 def encode_dataset(
     dataset_np: np.ndarray | torch.Tensor,
-    encoding_batch_size: int = 32*8192
+    encoding_batch_size: int = 12*8192
     ):
     dataset_t = torch.from_numpy(dataset_np)
     
@@ -782,7 +839,31 @@ def encode_dataset(
             batch_tensor = dataset_t[batch_start:batch_end].to("cuda")
             encoded_dataset[batch_start:batch_end] = ae.encode(batch_tensor).cpu()
     
-    return latent_components_scaling(encoded_dataset)
+    scaled_components = latent_components_scaling(encoded_dataset)
+    return scaled_components
+
+
+def prepare_autoencoder_dataset(
+    dataset_np: np.array
+    ):
+    num_species = DatasetConfig.num_species
+    num_params = DatasetConfig.num_physical_parameters
+    num_metadata = DatasetConfig.num_metadata
+    
+    dataset_np[:, 0] = np.arange(len(dataset_np))
+    
+    physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
+    abundances_scaling(dataset_np[:, -num_species:])
+    
+    index_pairs_np = calculate_autoencoder_index_pairs(dataset_np)
+    
+    perm = np.random.permutation(len(index_pairs_np))
+    index_pairs_shuffled_np = index_pairs_np[perm]
+    
+    dataset_t = torch.from_numpy(dataset_np).float()
+    index_pairs_shuffled_t = torch.from_numpy(index_pairs_shuffled_np).int()
+    
+    return (dataset_t, index_pairs_shuffled_t)
 
 
 def prepare_emulator_dataset(
@@ -803,7 +884,7 @@ def prepare_emulator_dataset(
     physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
     abundances_scaling(dataset_np[:, -num_species:])
     
-    latent_components = encode_dataset(dataset_np[:, -num_species:])
+    latent_components = encode_dataset(dataset_np[:, num_metadata+num_params:])
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
     
     if sequential_time:

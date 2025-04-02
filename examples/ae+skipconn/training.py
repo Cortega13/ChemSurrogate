@@ -26,7 +26,7 @@ if __name__ == "__main__":
     training_dataloader = dp.tensor_to_dataloader(EMConfig, training_Dataset)
     validation_dataloader = dp.tensor_to_dataloader(EMConfig, validation_Dataset)
     
-    emulator, autoencoder, optimizer, scheduler = load_skipcon_emulator_objects(final_training_phase=False)
+    emulator, autoencoder, optimizer, scheduler = load_skipcon_emulator_objects()
     emulator_trainer = EmulatorTrainer(
         emulator,
         autoencoder,

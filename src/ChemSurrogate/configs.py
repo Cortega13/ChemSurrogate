@@ -11,7 +11,7 @@ class DatasetConfig:
     working_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # The path to the root folder of the project.
     num_training_models =   60_000    # Each model has a different set of initial physical parameters. They all begin with identical initial abundances.
     num_validation_models = 20_000  
-    num_timesteps_per_model = 101   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
+    num_timesteps_per_model = 100   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
     timestep_duration = 1_000       # In years
     num_metadata = 3
     num_physical_parameters = 4
@@ -40,11 +40,11 @@ class DatasetConfig:
     validation_dataset_path = os.path.join(working_path, "data/uclchem_validation.h5")
 
 class AEConfig:
-    columns = DatasetConfig.species
+    columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
-    input_dim = DatasetConfig.num_species
+    input_dim = DatasetConfig.num_physical_parameters + DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
     hidden_dims = (320, 160)
     latent_dim = 12
@@ -53,17 +53,18 @@ class AEConfig:
     lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 10
-    betas = (0.99, 0.999)
+    betas = (0.999, 0.9999)
     weight_decay = 1e-4
-    exponential_coefficient = 52
+    exponential_coefficient = 20
     conservation_weight = 1e2
-    structural_weight = 1e4
+    temporal_weight = 5e3
+    structural_weight = 0
     num_anchors = 256
-    batch_size = 4*8192
+    batch_size = 12*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 1
+    gradient_clipping = 5
     dropout = 0.0
-    noise = 0.05
+    noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
@@ -74,25 +75,25 @@ class EMConfig:
     columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     # Model Config
-    input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim
-    hidden_dim = 128
+    input_dim = 1 + DatasetConfig.num_physical_parameters + AEConfig.latent_dim # The 1 is for the time input.
+    hidden_dim = 256
     output_dim = AEConfig.latent_dim
-    num_blocks = 1
+    num_blocks = 2
     
     # Hyperparameters Config
     lr = 1e-4
     lr_decay = 0.5
-    lr_decay_patience = 5
-    betas = (0.6, 0.7)
+    lr_decay_patience = 6
+    betas = (0.995, 0.9999)
     weight_decay = 1e-2
     loss_scaling_factor = 1e-3
     exponential_coefficient = 20
-    alpha = 3e3
-    batch_size = 256
+    alpha = 1e3
+    batch_size = 12*8192 
     stagnant_epoch_patience = 20
-    gradient_clipping = 5
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
+    gradient_clipping = 4
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     dropout = 0.0
     save_model = True
     shuffle = True
@@ -119,6 +120,7 @@ class PredefinedTensors:
     
     AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
     AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
+    AE_temporal_weight = torch.tensor(AEConfig.temporal_weight, device=device).float()
     
     EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
     

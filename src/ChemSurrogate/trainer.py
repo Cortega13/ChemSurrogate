@@ -137,15 +137,17 @@ class AutoencoderTrainer(Trainer):
         )
 
 
-    def _run_training_batch(self, features):
+    def _run_training_batch(self, features, featuresT1):
         """
         Runs a training batch where features = targets since this is an autoencoder.
         """
         self.optimizer.zero_grad()
         outputs, z = self.model(features)
+        outputsT1, _ = self.model(featuresT1)
         loss = dp.autoencoder_loss_function(
             outputs,
-            features,
+            outputsT1,
+            features[:, DatasetConfig.num_physical_parameters:],
             z,
             )
 
@@ -161,7 +163,7 @@ class AutoencoderTrainer(Trainer):
         component_outputs = self.model.encode(features)
         outputs = self.model.decode(component_outputs)
 
-        loss = dp.validation_loss_function(outputs, features)
+        loss = dp.validation_loss_function(outputs, features[:, DatasetConfig.num_physical_parameters:])
         self.epoch_validation_loss += loss
 
 
@@ -173,15 +175,16 @@ class AutoencoderTrainer(Trainer):
         
         tic1 = datetime.now()
         self.model.train()
-        for features in self.training_dataloader:
-            features = features[0].to(device, non_blocking=True)
-            self._run_training_batch(features)
+        for features, featuresT1 in self.training_dataloader:
+            features = features.to(device, non_blocking=True)
+            featuresT1 = featuresT1.to(device, non_blocking=True)
+            self._run_training_batch(features, featuresT1)
 
         tic2 = datetime.now()
         self.model.eval()
         with torch.no_grad():
-            for features in self.validation_dataloader:
-                features = features[0].to(device, non_blocking=True)
+            for features, featuresT1 in self.validation_dataloader:
+                features = features.to(device, non_blocking=True)
                 self._run_validation_batch(features)
 
         toc = datetime.now()
@@ -244,12 +247,11 @@ class EmulatorTrainer(Trainer):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
         self.optimizer.step()
-        for name, param in self.model.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
-                print(f"Gradient norm for {name}: {grad_norm:.4e}")
-
-        
+        # for name, param in self.model.named_parameters():
+        #     if param.grad is not None:
+        #         grad_norm = param.grad.norm().item()
+        #         print(f"Gradient norm for {name}: {grad_norm:.4e}")
+     
 
     def _run_validation_batch(self, features, targets):
         """
@@ -349,6 +351,10 @@ class EmulatorTrainerSequential(Trainer):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
         self.optimizer.step()
+        # for name, param in self.model.named_parameters():
+        #     if param.grad is not None:
+        #         grad_norm = param.grad.norm().item()
+        #         print(f"Gradient norm for {name}: {grad_norm:.4e}")
         
 
     def _run_validation_batch(self, features, targets):
@@ -362,7 +368,7 @@ class EmulatorTrainerSequential(Trainer):
         outputs = self.ae.decode(outputs)
         outputs = outputs.reshape(targets.size(0), targets.size(1), -1)
         
-        loss = dp.validation_loss_function(outputs, targets)
+        loss = dp.validation_loss_function(outputs, targets).mean(dim=0)
         
         self.epoch_validation_loss += loss
 
@@ -412,16 +418,7 @@ class EmulatorTrainerSequential(Trainer):
 
 
 
-# Squeeeeeze performance functions
-def freeze_bn_layers(model):
-    for module in model.modules():
-        if isinstance(module, torch.nn.BatchNorm1d):
-            module.eval()
-            for param in module.parameters():
-                param.requires_grad = False
-
-
-def load_autoencoder_objects(is_inference=False, final_training_phase=False):
+def load_autoencoder_objects(is_inference=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
         latent_dim=AEConfig.latent_dim,
@@ -436,11 +433,7 @@ def load_autoencoder_objects(is_inference=False, final_training_phase=False):
     if is_inference:
         ae.eval()
         for param in ae.parameters():
-            param.requires_grad = False
-    elif final_training_phase:
-        print("Final Training Phase Activated (batchnorm frozen)")
-        freeze_bn_layers(ae)
-    
+            param.requires_grad = False    
 
     optimizer = optim.AdamW(
         ae.parameters(),
@@ -509,7 +502,7 @@ def load_emulator_objects(is_inference=False):
     return emulator, ae, optimizer, scheduler
 
 
-def load_skipcon_emulator_objects(is_inference=False, final_training_phase=False):
+def load_skipcon_emulator_objects(is_inference=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
         latent_dim=AEConfig.latent_dim,
@@ -540,9 +533,6 @@ def load_skipcon_emulator_objects(is_inference=False, final_training_phase=False
         emulator.eval()
         for param in emulator.parameters():
             param.requires_grad = False
-    elif final_training_phase:
-        print(f"Final Training Phase Activated (batchnorm frozen)")
-        freeze_bn_layers(emulator)
 
     optimizer = optim.AdamW(
         emulator.parameters(),

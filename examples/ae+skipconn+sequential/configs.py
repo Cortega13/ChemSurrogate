@@ -11,7 +11,7 @@ class DatasetConfig:
     working_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # The path to the root folder of the project.
     num_training_models =   60_000    # Each model has a different set of initial physical parameters. They all begin with identical initial abundances.
     num_validation_models = 20_000  
-    num_timesteps_per_model = 100   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
+    num_timesteps_per_model = 101   # Duration that each model runs for. Multiply by timestep_duration to get total evolution time.
     timestep_duration = 1_000       # In years
     num_metadata = 3
     num_physical_parameters = 4
@@ -74,29 +74,29 @@ class EMConfig:
     columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
     num_columns = len(columns)
     # Model Config
-    input_dim = 1 + DatasetConfig.num_physical_parameters + AEConfig.latent_dim # The 1 is for the time input.
-    hidden_dim = 256
+    input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim
+    hidden_dim = 64
     output_dim = AEConfig.latent_dim
-    num_blocks = 2
+    num_blocks = 4
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 5
-    betas = (0.6, 0.7)
+    betas = (0.9, 0.7)
     weight_decay = 1e-2
     loss_scaling_factor = 1e-3
-    exponential_coefficient = 22
+    exponential_coefficient = 20
     alpha = 3e3
-    batch_size = 8*8192
+    batch_size = 256
     stagnant_epoch_patience = 20
-    gradient_clipping = 5
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.1
+    gradient_clipping = 1
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon_sequential.pth")
+    dropout = 0.0
     save_model = True
     shuffle = True
-    shuffle_chunk_size = 0.005
+    shuffle_chunk_size = 1
 
 
 class PredefinedTensors:

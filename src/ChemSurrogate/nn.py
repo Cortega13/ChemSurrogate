@@ -83,6 +83,24 @@ class Emulator(nn.Module):
         return self.layers(x)
 
 
+# class ResidualBlock(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
+#         super().__init__()
+#         self.net = nn.Sequential(
+#             nn.BatchNorm1d(input_dim),
+#             nn.GELU(),
+#             nn.Linear(input_dim, hidden_dim, bias=False),
+#             nn.Dropout(dropout),
+            
+#             nn.BatchNorm1d(hidden_dim),
+#             nn.GELU(),
+#             nn.Linear(hidden_dim, output_dim, bias=False),
+#             nn.Dropout(dropout),
+#         )
+        
+#     def forward(self, x):
+#         return x[:, 5:] + self.net(x)
+
 class ResidualBlock(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
         super().__init__()
@@ -110,7 +128,7 @@ class ResidualBlock(nn.Module):
 
 
 class RecursiveResNet(nn.Module):
-    def __init__(self, input_dim=17, hidden_dim=64, output_dim=12, num_blocks=2, dropout=0.0):
+    def __init__(self, input_dim=17, hidden_dim=128, output_dim=12, num_blocks=10, dropout=0.0):
         super().__init__()
         
         self.blocks = nn.ModuleList([
@@ -121,10 +139,12 @@ class RecursiveResNet(nn.Module):
                 dropout=dropout
             ) for _ in range(num_blocks)
         ])
+        self.final_activation = nn.Sigmoid()
         
     def forward(self, x):
-        params = x[:, :5]
-        x = x[:, 5:]
+        params = x[:, :5] # Physical Parameters
+        
+        x = x[:, 5:]# Chemical Abundances
         
         for block in self.blocks:
             x = torch.cat([params, x], dim=1)
@@ -155,11 +175,12 @@ class ResidualBlockSequential(nn.Module):
         )
         
     def forward(self, x):
-        return x[:, 4:] + self.net(x)
+        input_tensor = x[:, 4:].clone()
+        return input_tensor + self.net(x)
 
 
 class IterativeResNet(nn.Module):
-    def __init__(self, input_dim=17, hidden_dim=64, output_dim=12, num_blocks=2, dropout=0.0):
+    def __init__(self, input_dim=16, hidden_dim=64, output_dim=12, num_blocks=2, dropout=0.0, noise_level=0.05):
         super().__init__()
         
         self.blocks = nn.ModuleList([
@@ -171,14 +192,22 @@ class IterativeResNet(nn.Module):
             ) for _ in range(num_blocks)
         ])
         
+        self.timestep_norm = nn.RMSNorm(12)
+        self.noise_level = noise_level
+        self.training = True
+        
     def forward(self, x, timesteps):
-        params = x[:, :4]
-        x = x[:, 4:]
+        params = x[:, :4]  # Physical parameters
+        x = x[:, 4:]       # Species abundances (relative to H abundance then log scaled so it ranges 0 and 1.)
         
         outputs = []
         for _ in range(timesteps):
+            if self.training and self.noise_level > 0:
+                noise = x * (1 + torch.randn_like(x) * self.noise_level)
+                x = torch.clamp(noise, min=0.0)
             for block in self.blocks:
                 x = torch.cat([params, x], dim=1)
                 x = block(x)
+            x = self.timestep_norm(x)
             outputs.append(x)
         return torch.stack(outputs, dim=1)
