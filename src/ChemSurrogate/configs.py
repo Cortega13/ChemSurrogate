@@ -40,11 +40,11 @@ class DatasetConfig:
     validation_dataset_path = os.path.join(working_path, "data/uclchem_validation.h5")
 
 class AEConfig:
-    columns = DatasetConfig.metadata + DatasetConfig.physical_parameters + DatasetConfig.species
+    columns = DatasetConfig.metadata + DatasetConfig.species
     num_columns = len(columns)
     component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
     # Model Config
-    input_dim = DatasetConfig.num_physical_parameters + DatasetConfig.num_species
+    input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
     hidden_dims = (320, 160)
     latent_dim = 12
@@ -84,17 +84,17 @@ class EMConfig:
     lr = 1e-4
     lr_decay = 0.5
     lr_decay_patience = 6
-    betas = (0.995, 0.9999)
-    weight_decay = 1e-2
+    betas = (0.995, 0.999)
+    weight_decay = 1e-4
     loss_scaling_factor = 1e-3
     exponential_coefficient = 20
-    alpha = 1e3
-    batch_size = 12*8192 
+    alpha = 3e3
+    batch_size = 12*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 4
+    gradient_clipping = 5
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.0
+    dropout = 0.01
     save_model = True
     shuffle = True
     shuffle_chunk_size = 0.005

@@ -622,23 +622,13 @@ class AutoencoderDataset(Dataset):
 
 
 class ChunkedShuffleSampler(Sampler):
-    """
-    Shuffle data in chunks so that we don't create a huge random permutation
-    of the entire dataset in memory at once. Each epoch will see a different
-    chunk ordering due to a new random seed.
-    """
-    def __init__(
-        self,
-        data_size: int,
-        chunk_size: int,
-        seed: int = 13
-    ):
+    def __init__(self, data_size: int, chunk_size: int, seed: int = 13):
         super().__init__()
         self.data_size = int(data_size)
         self.chunk_size = int(chunk_size)
         self.base_seed = seed
         self.epoch = 0
-
+        
         self.chunks = []
         start = 0
         while start < self.data_size:
@@ -647,27 +637,28 @@ class ChunkedShuffleSampler(Sampler):
             start = end
         
         self.generator = torch.Generator()
-
-
+    
     def set_epoch(self, epoch: int):
         self.epoch = epoch
-
-
+    
     def __iter__(self):
-        self.generator.manual_seed(self.base_seed + self.epoch)
-
-        chunk_indices = torch.randperm(len(self.chunks), generator=self.generator)
-
-        for chunk_idx in chunk_indices:
+        g = torch.Generator()
+        g.manual_seed(self.base_seed + self.epoch)
+        
+        chunk_indices = torch.randperm(len(self.chunks), generator=g)
+        
+        for i, chunk_idx in enumerate(chunk_indices):
+            chunk_seed = self.base_seed + self.epoch * 10000 + i
+            g.manual_seed(chunk_seed)
+            
             start, end = self.chunks[chunk_idx]
             length = end - start
-
-            chunk_perm = torch.randperm(length, generator=self.generator)
+            
+            chunk_perm = torch.randperm(length, generator=g)
             chunk_perm += start
-
+            
             yield from chunk_perm.tolist()
-
-
+    
     def __len__(self):
         return self.data_size
 
