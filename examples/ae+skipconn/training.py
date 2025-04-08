@@ -12,8 +12,7 @@ if __name__ == "__main__":
     
     # training_dataset = dp.prepare_emulator_dataset(training_np)
     # validation_dataset = dp.prepare_emulator_dataset(validation_np)
-        
-    # =
+    # dp.save_tensors_to_hdf5(training_dataset, category="training")
     # dp.save_tensors_to_hdf5(validation_dataset, category="validation")
 
     training_dataset, training_indices = dp.load_tensors_from_hdf5(category="training")

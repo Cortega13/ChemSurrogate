@@ -137,17 +137,15 @@ class AutoencoderTrainer(Trainer):
         )
 
 
-    def _run_training_batch(self, features, featuresT1):
+    def _run_training_batch(self, features):
         """
         Runs a training batch where features = targets since this is an autoencoder.
         """
         self.optimizer.zero_grad()
         outputs, z = self.model(features)
-        outputsT1, _ = self.model(featuresT1)
         loss = dp.autoencoder_loss_function(
             outputs,
-            outputsT1,
-            features[:, DatasetConfig.num_physical_parameters:],
+            features,
             z,
             )
 
@@ -163,7 +161,7 @@ class AutoencoderTrainer(Trainer):
         component_outputs = self.model.encode(features)
         outputs = self.model.decode(component_outputs)
 
-        loss = dp.validation_loss_function(outputs, features[:, DatasetConfig.num_physical_parameters:])
+        loss = dp.validation_loss_function(outputs, features)
         self.epoch_validation_loss += loss
 
 
@@ -175,16 +173,15 @@ class AutoencoderTrainer(Trainer):
         
         tic1 = datetime.now()
         self.model.train()
-        for features, featuresT1 in self.training_dataloader:
-            features = features.to(device, non_blocking=True)
-            featuresT1 = featuresT1.to(device, non_blocking=True)
-            self._run_training_batch(features, featuresT1)
+        for features in self.training_dataloader:
+            features = features[0].to(device, non_blocking=True)
+            self._run_training_batch(features)
 
         tic2 = datetime.now()
         self.model.eval()
         with torch.no_grad():
-            for features, featuresT1 in self.validation_dataloader:
-                features = features.to(device, non_blocking=True)
+            for features in self.validation_dataloader:
+                features = features[0].to(device, non_blocking=True)
                 self._run_validation_batch(features)
 
         toc = datetime.now()

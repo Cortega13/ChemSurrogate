@@ -205,7 +205,7 @@ def generate_stoichiometric_matrix():
     An unscaled vector of the species multiplied by this matrix will give the elemental abundances, which are conserved.
     Additionally tracks BULK and SURFACE stoichiometric.
     """
-    elements = ["H", "HE", "C", "N", "O", "S", "SI", "MG", "CL", "BULK", "SURFACE"]
+    elements = ["H", "HE", "C", "N", "O", "S", "SI", "MG", "CL"]
     stoichiometric_matrix = np.zeros((len(elements), DatasetConfig.num_species))
     modified_species = [s.replace("BULK_", "").replace("SURF_", "") for s in DatasetConfig.species]
     
@@ -228,15 +228,6 @@ def generate_stoichiometric_matrix():
             if match and species not in ["SURFACE", "BULK"]:
                 multiplier = int(match.group(1)) if match.group(1) else 1
                 stoichiometric_matrix[elem_index, i] = multiplier
-    
-    bulk_index = elements.index("BULK")
-    surface_index = elements.index("SURFACE")
-    
-    for i, species in enumerate(DatasetConfig.species):
-        if species.startswith("BULK_"):
-            stoichiometric_matrix[bulk_index, i] = 1
-        elif species.startswith("SURF_"):
-            stoichiometric_matrix[surface_index, i] = 1
         
     return stoichiometric_matrix.T
 
@@ -301,7 +292,7 @@ def inverse_abundances_scaling_np(
     np.multiply(abundances, (max_ - min_), out=abundances)
     np.add(abundances, min_, out=abundances)
     np.exp(exponent * abundances, out=abundances)
-
+    
 
 @torch.jit.script
 def inverse_abundances_scaling(
@@ -371,7 +362,6 @@ def calculate_conservation_loss(
     log_elemental_abundances2 = torch.log10(elemental_abundances2)
     
     diff = torch.abs(log_elemental_abundances2 - log_elemental_abundances1)
-    diff[:, -2:] = diff[:, -2:]*0.05
     
     return torch.sum(diff) / tensor1.size(0)
 
@@ -413,17 +403,15 @@ def calculate_structural_loss(
 def temporal_smoothness_loss(outputs, outputsT1):
     return F.mse_loss(outputs, outputsT1)
 
-@torch.jit.script
+#@torch.jit.script
 def autoencoder_loss_function(
     outputs: torch.Tensor,
-    outputsT1: torch.Tensor,
     targets: torch.Tensor,
     latent_components: torch.Tensor,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
     structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
-    temporal_weight: torch.Tensor = PredefinedTensors.AE_temporal_weight,
     ):
     """
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
@@ -440,11 +428,10 @@ def autoencoder_loss_function(
         latent_components
         )
     
-    temporal_loss = temporal_weight * temporal_smoothness_loss(outputs, outputsT1)
     
-    total_loss = (elementwise_loss +  conservation_error + structural_loss + temporal_loss)
+    total_loss = (elementwise_loss +  conservation_error + structural_loss) * 1e-3
     
-    #print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e}  Temporal: {temporal_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
@@ -585,24 +572,14 @@ class AutoencoderDataset(Dataset):
     def __init__(
         self,
         data_matrix: torch.Tensor,
-        index_pairs: torch.Tensor,
     ):
         self.data_matrix = data_matrix
-        self.index_pairs = index_pairs
-        self.num_species = DatasetConfig.num_species
-        self.num_metadata = DatasetConfig.num_metadata
-
         data_matrix_size = self.data_matrix.nbytes / (1024 ** 2)
-        index_pairs_size = self.index_pairs.nbytes / (1024 ** 2)
-
         print(f"Data_matrix Memory usage: {data_matrix_size:.3f} MB")
-        print(f"Index_pairs Memory usage: {index_pairs_size:.2f} MB\n")
-        
-        print(f"Dataset Size: {len(self.data_matrix)} | Index Pairs: {len(self.index_pairs)}\n")
 
 
     def __len__(self):
-        return len(self.index_pairs)
+        return len(self.data_matrix)
 
 
     def __getitems__(
@@ -611,14 +588,8 @@ class AutoencoderDataset(Dataset):
         ):
         
         indices = torch.tensor(indices, dtype=torch.long)
-        pairs = self.index_pairs[indices]
-        rows = self.data_matrix[pairs]
-        
-        rows = rows[:, :, self.num_metadata:]
-                
-        features = rows[:, 0, :]
-        featuresT1 = rows[:, 1, :]
-        return features, featuresT1
+        features = self.data_matrix[indices]
+        return features, 1
 
 
 class ChunkedShuffleSampler(Sampler):
@@ -838,12 +809,9 @@ def prepare_autoencoder_dataset(
     dataset_np: np.array
     ):
     num_species = DatasetConfig.num_species
-    num_params = DatasetConfig.num_physical_parameters
-    num_metadata = DatasetConfig.num_metadata
     
     dataset_np[:, 0] = np.arange(len(dataset_np))
     
-    physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_params])
     abundances_scaling(dataset_np[:, -num_species:])
     
     index_pairs_np = calculate_autoencoder_index_pairs(dataset_np)
