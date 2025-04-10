@@ -144,49 +144,47 @@ def plot_abundances_vs_time_comparison(
     
 
 def scatter_abundances_vs_physical_parameters(
-    df: pd.DataFrame,
+    training_df: pd.DataFrame,
+    inference_df: pd.DataFrame,
     species_of_interest: list,
-    output_folder:str = "plots/scatter_abundances_vs_physical_parameters",
+    output_folder: str = "plots/compare_scatter_abundances",
     ):
     """
-    Generates a scatter plot for each species and each physical parameter of abundance vs. physical parameter.
+    Generates comparative scatter plots of training vs. predicted abundances
+    for each species vs. each physical parameter.
     """
     
-    global_mins = (np.log10(df[DatasetConfig.physical_parameters].min()))
-    global_maxs = (np.log10(df[DatasetConfig.physical_parameters].max()))
+    combined_df = pd.concat([training_df, inference_df], ignore_index=True)
+    global_mins = np.log10(combined_df[DatasetConfig.physical_parameters].min())
+    global_maxs = np.log10(combined_df[DatasetConfig.physical_parameters].max())
     
     for species in species_of_interest:
-        _, axes = plt.subplots(2, 2, figsize=(12, 10))
-        axes = axes.flatten()
-
+        fig, axes = plt.subplots(4, 2, figsize=(16, 20))
+        
         for i, varying_param in enumerate(DatasetConfig.physical_parameters):
-            df_subset_sorted = df.sort_values(by=varying_param, ascending=True)
+            df_subset = training_df.sort_values(by=varying_param, ascending=True)
             other_params = [p for p in DatasetConfig.physical_parameters if p != varying_param]
-            df_color = np.log10(df_subset_sorted[other_params].astype(float))
+            df_color = np.log10(df_subset[other_params].astype(float))
             colors = (df_color - global_mins[other_params]) / (
                 global_maxs[other_params] - global_mins[other_params]
             )
             colors = (colors - colors.min()) / (colors.max() - colors.min())
             colors = 1 / (1 + np.exp(-10 * (colors - 0.5)))
             colors *= 0.8
-            
             colors = colors.to_numpy()
 
-            ax = axes[i]
-            ax.scatter(
-                np.log10(df_subset_sorted[varying_param]),
-                np.log10(df_subset_sorted[species]),
+            ax_train = axes[i, 0]
+            ax_train.scatter(
+                np.log10(df_subset[varying_param]),
+                np.log10(df_subset[species]),
                 c=colors,
                 marker='.',
-                linewidth=0.1,
-                label=species
+                linewidth=0.1
             )
-
-            ax.set_xlabel(f"Log {species} Abundance")
-            ax.set_ylabel(f"Log {varying_param}")
-            ax.set_title(f"Log {varying_param} vs. Log {species}")
-            ax.grid(True)
-            #ax.set_ylim(-20, 0)
+            ax_train.set_xlabel(f"Log {varying_param}")
+            ax_train.set_ylabel(f"Log {species} Abundance")
+            ax_train.set_title(f"Training: Log {varying_param} vs. Log {species}")
+            ax_train.grid(True)
 
             channel_info = (
                 f"R = {other_params[0]} "
@@ -196,23 +194,67 @@ def scatter_abundances_vs_physical_parameters(
                 f"B = {other_params[2]} "
                 f"[{global_mins[other_params[2]]:.2e}, {global_maxs[other_params[2]]:.2e}]"
             )
-            ax.text(
+            ax_train.text(
                 0., 1,
                 channel_info,
-                transform=ax.transAxes,
+                transform=ax_train.transAxes,
                 va='top',
                 ha='left',
                 fontsize=9,
                 bbox=dict(facecolor='white', alpha=0.7, boxstyle='round')
             )
 
+            df_subset = inference_df.sort_values(by=varying_param, ascending=True)
+            df_color = np.log10(df_subset[other_params].astype(float))
+            colors = (df_color - global_mins[other_params]) / (
+                global_maxs[other_params] - global_mins[other_params]
+            )
+            colors = (colors - colors.min()) / (colors.max() - colors.min())
+            colors = 1 / (1 + np.exp(-10 * (colors - 0.5)))
+            colors *= 0.8
+            colors = colors.to_numpy()
+
+            ax_pred = axes[i, 1]
+            ax_pred.scatter(
+                np.log10(df_subset[varying_param]),
+                np.log10(df_subset[species]),
+                c=colors,
+                marker='.',
+                linewidth=0.1
+            )
+            ax_pred.set_xlabel(f"Log {varying_param}")
+            ax_pred.set_ylabel(f"Log {species} Abundance")
+            ax_pred.set_title(f"Predicted: Log {varying_param} vs. Log {species}")
+            ax_pred.grid(True)
+
+            ax_pred.text(
+                0., 1,
+                channel_info,
+                transform=ax_pred.transAxes,
+                va='top',
+                ha='left',
+                fontsize=9,
+                bbox=dict(facecolor='white', alpha=0.7, boxstyle='round')
+            )
+            
+            y_min = min(np.log10(training_df[species].min()), np.log10(inference_df[species].min()))
+            y_max = max(np.log10(training_df[species].max()), np.log10(inference_df[species].max()))
+            x_min = min(np.log10(training_df[varying_param].min()), np.log10(inference_df[varying_param].min()))
+            x_max = max(np.log10(training_df[varying_param].max()), np.log10(inference_df[varying_param].max()))
+            
+            ax_train.set_xlim(x_min, x_max)
+            ax_train.set_ylim(y_min, y_max)
+            ax_pred.set_xlim(x_min, x_max)
+            ax_pred.set_ylim(y_min, y_max)
+
         plt.tight_layout()
         folder_path = os.path.join(DatasetConfig.working_path, output_folder)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
-        savefig_path = os.path.join(folder_path, f"{species}.png")
+        savefig_path = os.path.join(folder_path, f"{species}_comparison.png")
         plt.savefig(savefig_path, dpi=200, bbox_inches="tight")
         plt.show()
+        plt.close(fig)
 
 
 def plot_error_vs_time(

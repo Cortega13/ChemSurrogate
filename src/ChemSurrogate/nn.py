@@ -87,24 +87,6 @@ class Emulator(nn.Module):
         return self.layers(x)
 
 
-# class ResidualBlock(nn.Module):
-#     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
-#         super().__init__()
-#         self.net = nn.Sequential(
-#             nn.BatchNorm1d(input_dim),
-#             nn.GELU(),
-#             nn.Linear(input_dim, hidden_dim, bias=False),
-#             nn.Dropout(dropout),
-            
-#             nn.BatchNorm1d(hidden_dim),
-#             nn.GELU(),
-#             nn.Linear(hidden_dim, output_dim, bias=False),
-#             nn.Dropout(dropout),
-#         )
-        
-#     def forward(self, x):
-#         return x[:, 5:] + self.net(x)
-
 class ResidualBlock(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.0):
         super().__init__()
@@ -153,6 +135,7 @@ class RecursiveResNet(nn.Module):
         for block in self.blocks:
             x = torch.cat([params, x], dim=1)
             x = block(x)
+        #x = self.final_activation(x)
         return x
 
 

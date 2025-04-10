@@ -93,7 +93,7 @@ class EMConfig:
     gradient_clipping = 4
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
     save_model_path = os.path.join(DatasetConfig.working_path, "models/skipcon.pth")
-    dropout = 0.0
+    dropout = 0.1
     save_model = True
     shuffle = True
     shuffle_chunk_size = 0.005

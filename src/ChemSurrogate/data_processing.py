@@ -435,7 +435,7 @@ def autoencoder_loss_function(
     return total_loss
 
 
-@torch.jit.script
+#@torch.jit.script
 def emulator_training_loss_function(
     outputs,
     targets,
@@ -455,7 +455,7 @@ def emulator_training_loss_function(
     
     total_loss = sum_elementwise_loss + alpha*conservation_error
     total_loss = total_loss * loss_scaling_factor
-    #print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
+    print(f"Recon: {sum_elementwise_loss:.3e} | Cons: {alpha*conservation_error:.3e} | Total: {total_loss:.3e}")
     return total_loss
 
 
@@ -927,8 +927,8 @@ def baseAvtoAv(
     baseAv_idx = 2
     density_idx = 0
     multiplier = 0.0000964375
-    np.add(physical_parameters[:, baseAv_idx], physical_parameters[:, density_idx], out=physical_parameters[:, baseAv_idx])
-    np.multiply(physical_parameters[:, baseAv_idx], multiplier, out=physical_parameters[:, baseAv_idx])
+    additive = np.multiply(multiplier, physical_parameters[:, density_idx])
+    np.add(physical_parameters[:, baseAv_idx], additive, out=physical_parameters[:, baseAv_idx])
 
 
 ### Inferencing Functions
