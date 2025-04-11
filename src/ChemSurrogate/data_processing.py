@@ -934,7 +934,7 @@ def baseAvtoAv(
 ### Inferencing Functions
 def encoder_inferencing(autoencoder, inputs, batch_size=8192):
     num_inputs = inputs.size(0)
-    
+        
     encoded_features = []
     for batch_start in range(0, num_inputs, batch_size):
         batch_end = min(batch_start + batch_size, num_inputs)

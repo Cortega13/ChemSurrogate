@@ -44,18 +44,18 @@ def add_timesteps_to_conditions(
 
 
 def add_multiple_timesteps_to_conditions(
-    initial_conditions: np.array,
+    initial_conditions: torch.Tensor,
     num_timesteps: int = 95
 ):
     """
     Expands the initial conditions tensor to include copies for each timestep.
     Adds a time column to the expanded tensor.
     """
-    time_values = np.linspace(1, num_timesteps, num=num_timesteps).reshape(num_timesteps, 1) / 100
+    time_values = torch.linspace(1, num_timesteps, num_timesteps).reshape(num_timesteps, 1) / 100
 
-    expanded_conditions = np.tile(initial_conditions, (num_timesteps, 1))
+    expanded_conditions = initial_conditions.repeat(num_timesteps, 1)
 
-    conditions_with_time = np.hstack((time_values, expanded_conditions))
+    conditions_with_time = torch.cat((time_values, expanded_conditions), dim=1)
     
     return conditions_with_time
 
@@ -251,7 +251,7 @@ def scatter_abundances_vs_physical_parameters(
         folder_path = os.path.join(DatasetConfig.working_path, output_folder)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
-        savefig_path = os.path.join(folder_path, f"{species}_comparison.png")
+        savefig_path = os.path.join(folder_path, f"{species}.png")
         plt.savefig(savefig_path, dpi=200, bbox_inches="tight")
         plt.show()
         plt.close(fig)
