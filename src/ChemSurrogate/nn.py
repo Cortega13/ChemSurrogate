@@ -14,17 +14,11 @@ class Autoencoder(nn.Module):
         self.encoder_fc3 = nn.Linear(hidden_dims[1], latent_dim)
         self.encoder_norm3 = nn.BatchNorm1d(latent_dim)
         
-        # Decoder only needs batch norms and biases as weights are tied
         self.decoder_bn1 = nn.BatchNorm1d(hidden_dims[1])
         self.decoder_bn2 = nn.BatchNorm1d(hidden_dims[0])
         
-        # Optional bias terms for decoder (since encoder has bias=False)
-        self.decoder_bias1 = nn.Parameter(torch.zeros(hidden_dims[1]))
-        self.decoder_bias2 = nn.Parameter(torch.zeros(hidden_dims[0]))
-        self.decoder_bias3 = nn.Parameter(torch.zeros(input_dim))
-        
-        self.activation = nn.GELU()
-        self.final_activation = nn.Sigmoid()  # For 0-1 bounded output
+        self.activation = nn.LeakyReLU()
+        self.final_activation = nn.Sigmoid()
         self.dropout = nn.Dropout(dropout)
         self.noise = noise
 
@@ -36,14 +30,14 @@ class Autoencoder(nn.Module):
         return z
 
     def decode(self, z):
-        z = F.linear(z, self.encoder_fc3.weight.t()) + self.decoder_bias1
+        z = F.linear(z, self.encoder_fc3.weight.t())
         z = self.activation(self.decoder_bn1(z))
         
-        z = F.linear(z, self.encoder_fc2.weight.t()) + self.decoder_bias2
+        z = F.linear(z, self.encoder_fc2.weight.t())
         z = self.activation(self.decoder_bn2(z))
         z = self.dropout(z)
         
-        x_reconstructed = F.linear(z, self.encoder_fc1.weight.t()) + self.decoder_bias3
+        x_reconstructed = F.linear(z, self.encoder_fc1.weight.t())
         x_reconstructed = self.final_activation(x_reconstructed)
         return x_reconstructed
 

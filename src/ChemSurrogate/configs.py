@@ -46,24 +46,26 @@ class AEConfig:
     # Model Config
     input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
-    hidden_dims = (320, 200)
+    hidden_dims = (320, 240)
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 1e-3
+    lr = 1e-2
     lr_decay = 0.5
     lr_decay_patience = 10
     betas = (0.99, 0.999)
-    weight_decay = 1e-4
-    exponential_coefficient = 52
+    weight_decay = 1e-3
+    exponential_coefficient = 20
     conservation_weight = 1e2
     structural_weight = 1e1
     num_anchors = 256
     batch_size = 8*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 2
-    dropout = 0.0
-    noise = 0.05
+    gradient_clipping = 1
+    dropout_decay_patience = 20
+    dropout_reduction_factor = 0.05
+    dropout = 0.4
+    noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
     pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")

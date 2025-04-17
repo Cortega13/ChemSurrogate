@@ -708,37 +708,26 @@ def calculate_emulator_index_pairs(
     return index_pairs
 
 @njit
-def calculate_emulator_index_pairs_sequential(
-    dataset_np: np.ndarray
+def calculate_emulator_indices_sequential(
+    dataset_np: np.ndarray,
+    window_size: int = 16,
     ):
-    """
-    Returns a 2D array with sequences padded with -1 values.
-    For each model with indices [0,1,2,...,n]:
-    - First sequence: [0,1,2,...,n]
-    - Second sequence: [1,2,3,...,n]
-    - And so on, with the last sequence being [n-1, n]
-    Padding value of -1 indicates end of valid data.
-    """
     change_indices = np.where(np.diff(dataset_np[:, 1].astype(np.int32)) != 0)[0] + 1
     model_groups = np.split(dataset_np, change_indices)
     
     total_seqs = 0
-    max_seq_len = 0
     for group in model_groups:
         n = len(group)
-        total_seqs += n - 1
-        max_seq_len = max(max_seq_len, n)
+        total_seqs += n - window_size + 1
     
-    sequences = np.full((total_seqs, max_seq_len), -1, dtype=np.int32)
+    sequences = np.full((total_seqs, window_size), -1, dtype=np.int32)
     
     seq_idx = 0
     for group in model_groups:
         indices = group[:, 0]
         n = len(indices)
-        
-        for start_idx in range(n-1):
-            seq_len = n - start_idx
-            sequences[seq_idx, :seq_len] = indices[start_idx:]
+        for start_idx in range(n - window_size + 1):
+            sequences[seq_idx, :] = indices[start_idx:start_idx + window_size]
             seq_idx += 1
     
     return sequences
@@ -777,7 +766,7 @@ def inverse_physical_parameter_scaling(
     np.power(10, physical_parameters, out=physical_parameters)
 
 
-def encode_dataset(
+def encode_dataset( 
     dataset_np: np.ndarray | torch.Tensor,
     encoding_batch_size: int = 12*8192
     ):
@@ -847,7 +836,7 @@ def prepare_emulator_dataset(
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
     
     if sequential_time:
-        index_pairs_np = calculate_emulator_index_pairs_sequential(encoded_dataset_np)
+        index_pairs_np = calculate_emulator_indices_sequential(encoded_dataset_np)
     else:
         index_pairs_np = calculate_emulator_index_pairs(encoded_dataset_np)
     

@@ -18,7 +18,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-
+torch.autograd.set_detect_anomaly(True)
 
 class Trainer:
     def __init__(
@@ -43,6 +43,7 @@ class Trainer:
         self.validation_dataloader = validation_dataloader
         self.num_validation_batches = len(self.validation_dataloader.dataset)
         
+        self.current_dropout_rate = self.model_config.dropout
         self.best_weights = None
         self.metric_minimum_loss = np.inf
         self.epoch_validation_loss = torch.zeros(
@@ -60,6 +61,16 @@ class Trainer:
         model_path = os.path.join(self.model_config.save_model_path)
         if self.model_config.save_model:
             torch.save(checkpoint, model_path)
+
+
+    def set_dropout_rate(self, dropout_rate):
+        """
+        Sets the dropout rate for all dropout layers in the model.
+        """
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.Dropout):
+                module.p = dropout_rate
+        self.current_dropout_rate = dropout_rate
 
 
     def _check_early_stopping(self):
@@ -98,6 +109,20 @@ class Trainer:
             self.stagnant_epochs += 1
             print(f"Stagnant {self.stagnant_epochs} \nMinimum: {self.metric_minimum_loss:.3e} \nMean: {mean_loss:.3e} \nStd: {std_loss:.3e} \nMax: {max_loss:.3e} \nMetric: {metric:.3e}")
             
+            if self.stagnant_epochs % self.model_config.dropout_decay_patience == 0:
+                new_dropout = max(self.current_dropout_rate - self.model_config.dropout_reduction_factor, 0.0)
+                if new_dropout != self.current_dropout_rate:
+                    self.stagnant_epochs = 0
+                    self.set_dropout_rate(new_dropout)
+                    
+                    # Set learning rate based on dropout value
+                    learning_rate = 1e-3 if new_dropout <= 0.1 else self.model_config.lr
+                    
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = learning_rate
+                    
+                    print(f"Decreasing dropout rate to {self.current_dropout_rate:.4f} and setting learning rate to {learning_rate:.4e}.")
+            
             if self.stagnant_epochs == self.model_config.lr_decay_patience+1:
                 print("Reverting to previous best weights")
                 self.model.load_state_dict(self.best_weights)
@@ -106,6 +131,7 @@ class Trainer:
         self.scheduler.step(metric)
         print()
         print(f"Current Learning Rate: {self.optimizer.param_groups[0]['lr']:.3e}")
+        print(f"Current Dropout Rate: {self.current_dropout_rate:.4f}")
 
 
 class AutoencoderTrainer(Trainer):

@@ -24,28 +24,28 @@ if __name__ == "__main__":
     training_dataset = torch.from_numpy(training_np)
     validation_dataset = torch.from_numpy(validation_np)
     
-    # training_Dataset = dp.AutoencoderDataset(training_dataset)
-    # validation_Dataset = dp.AutoencoderDataset(validation_dataset)
+    training_Dataset = dp.AutoencoderDataset(training_dataset)
+    validation_Dataset = dp.AutoencoderDataset(validation_dataset)
 
-    # training_dataloader = dp.tensor_to_dataloader(AEConfig, training_Dataset)
-    # validation_dataloader = dp.tensor_to_dataloader(AEConfig, validation_Dataset)
+    training_dataloader = dp.tensor_to_dataloader(AEConfig, training_Dataset)
+    validation_dataloader = dp.tensor_to_dataloader(AEConfig, validation_Dataset)
 
-    # autoencoder, optimizer, scheduler = load_autoencoder_objects()
+    autoencoder, optimizer, scheduler = load_autoencoder_objects()
     
-    # autoencoder_trainer = AutoencoderTrainer(
-    #     autoencoder,
-    #     optimizer,
-    #     scheduler,
-    #     training_dataloader,
-    #     validation_dataloader
-    #     )
+    autoencoder_trainer = AutoencoderTrainer(
+        autoencoder,
+        optimizer,
+        scheduler,
+        training_dataloader,
+        validation_dataloader
+        )
     
-    # autoencoder_trainer.train()
+    autoencoder_trainer.train()
     
-    total_dataset = torch.vstack((training_dataset, validation_dataset))
+    # total_dataset = torch.vstack((training_dataset, validation_dataset))
     
-    component_scalers = dp.calculate_component_scalers(total_dataset)
-    print(f"Component Scalers (Min-Max of Latent Space): {component_scalers}")
+    # component_scalers = dp.calculate_component_scalers(total_dataset)
+    # print(f"Component Scalers (Min-Max of Latent Space): {component_scalers}")
     
-    component_scalers_path = DatasetConfig.working_path + "/utils/component_scalers.npy"
-    np.save(component_scalers_path, component_scalers)
+    # component_scalers_path = DatasetConfig.working_path + "/utils/component_scalers.npy"
+    # np.save(component_scalers_path, component_scalers)
