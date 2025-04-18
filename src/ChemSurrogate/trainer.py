@@ -116,7 +116,7 @@ class Trainer:
                     self.set_dropout_rate(new_dropout)
                     
                     # Set learning rate based on dropout value
-                    learning_rate = 1e-3 if new_dropout <= 0.1 else self.model_config.lr
+                    learning_rate = 1e-3 if new_dropout <= 0.2 else self.model_config.lr
                     
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = learning_rate
@@ -168,11 +168,10 @@ class AutoencoderTrainer(Trainer):
         Runs a training batch where features = targets since this is an autoencoder.
         """
         self.optimizer.zero_grad()
-        outputs, z = self.model(features)
+        outputs = self.model(features)
         loss = dp.autoencoder_loss_function(
             outputs,
             features,
-            z,
             )
 
         loss.backward()

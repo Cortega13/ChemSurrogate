@@ -14,19 +14,24 @@ class Autoencoder(nn.Module):
         self.encoder_fc3 = nn.Linear(hidden_dims[1], latent_dim)
         self.encoder_norm3 = nn.BatchNorm1d(latent_dim)
         
+        self.latent_scale = nn.Parameter(torch.ones(1))
+        
         self.decoder_bn1 = nn.BatchNorm1d(hidden_dims[1])
         self.decoder_bn2 = nn.BatchNorm1d(hidden_dims[0])
+        self.decoder_bias = nn.Parameter(torch.zeros(input_dim))
         
-        self.activation = nn.LeakyReLU()
-        self.final_activation = nn.Sigmoid()
+        self.activation = nn.GELU()
+        self.final_activation = nn.Softplus()
         self.dropout = nn.Dropout(dropout)
         self.noise = noise
 
     def encode(self, x):
         x = self.activation(self.encoder_bn1(self.encoder_fc1(x)))
+        x = self.dropout(x)
         x = self.activation(self.encoder_bn2(self.encoder_fc2(x)))
         x = self.dropout(x)
         z = self.activation(self.encoder_norm3(self.encoder_fc3(x)))
+        z = z * self.latent_scale
         return z
 
     def decode(self, z):
@@ -35,19 +40,20 @@ class Autoencoder(nn.Module):
         
         z = F.linear(z, self.encoder_fc2.weight.t())
         z = self.activation(self.decoder_bn2(z))
-        z = self.dropout(z)
         
-        x_reconstructed = F.linear(z, self.encoder_fc1.weight.t())
-        x_reconstructed = self.final_activation(x_reconstructed)
+        x_reconstructed = F.linear(z, self.encoder_fc1.weight.t()) + self.decoder_bias
+        x_reconstructed = self.final_activation(x_reconstructed) * 0.6
+        x_reconstructed = torch.clamp(x_reconstructed, min=0.0, max=1.0)
         return x_reconstructed
 
     def forward(self, x):
         z = self.encode(x)
+
         if self.training and self.noise > 0:
             noise = torch.randn_like(z) * self.noise
             z += noise
         x_reconstructed = self.decode(z)
-        return x_reconstructed, z
+        return x_reconstructed
 
 
 class Emulator(nn.Module):
@@ -108,7 +114,7 @@ class ResidualBlock(nn.Module):
 
 
 class RecursiveResNet(nn.Module):
-    def __init__(self, input_dim=17, hidden_dim=128, output_dim=12, num_blocks=10, dropout=0.0):
+    def __init__(self, input_dim=17, hidden_dim=256, output_dim=12, num_blocks=2, dropout=0.0):
         super().__init__()
         
         self.blocks = nn.ModuleList([

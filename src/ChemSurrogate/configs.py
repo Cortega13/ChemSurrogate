@@ -46,7 +46,7 @@ class AEConfig:
     # Model Config
     input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
-    hidden_dims = (320, 240)
+    hidden_dims = (360, 240)
     latent_dim = 12
     
     # Hyperparameters Config
@@ -54,17 +54,15 @@ class AEConfig:
     lr_decay = 0.5
     lr_decay_patience = 10
     betas = (0.99, 0.999)
-    weight_decay = 1e-3
+    weight_decay = 1e-4
     exponential_coefficient = 20
     conservation_weight = 1e2
-    structural_weight = 1e1
-    num_anchors = 256
-    batch_size = 8*8192
+    batch_size = 12*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 1
+    gradient_clipping = 4
     dropout_decay_patience = 20
     dropout_reduction_factor = 0.05
-    dropout = 0.4
+    dropout = 0.3
     noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
@@ -120,7 +118,6 @@ class PredefinedTensors:
     EM_exponential_coefficient = torch.tensor(EMConfig.exponential_coefficient, device=device).float()
     
     AE_conservation_weight = torch.tensor(AEConfig.conservation_weight, device=device).float()
-    AE_structural_weight = torch.tensor(AEConfig.structural_weight, device=device).float()
     
     EM_alpha = torch.tensor(EMConfig.alpha, device=device).float()
     

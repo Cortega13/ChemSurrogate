@@ -366,52 +366,13 @@ def calculate_conservation_loss(
     return torch.sum(diff) / tensor1.size(0)
 
 
-@torch.jit.script
-def calculate_structural_loss(
-    targets: torch.Tensor,
-    latent_components: torch.Tensor,
-    num_anchors: int = AEConfig.num_anchors,
-    eps: torch.Tensor = torch.tensor(1e-8).to("cuda").float(),
-    device: torch.device = device,
-):
-    """
-    Anchor-based latent structure loss. 
-    Random points are sampled from regular and latent space.
-    Distances of all points to these anchors are calculated and normalized.
-    These normalized distances are compared to calculate the loss.
-    """
-    batch_size = targets.size(0)
-    
-    anchor_indices = torch.randperm(batch_size, device=device)[:num_anchors]
-    
-    target_anchors = torch.index_select(targets, 0, anchor_indices)
-    latent_anchors = torch.index_select(latent_components, 0, anchor_indices)
-    
-    target_dists = torch.cdist(targets, target_anchors, p=2.0)
-    
-    latent_dists = torch.cdist(latent_components, latent_anchors, p=2.0)
-    
-    target_dists_max = torch.max(target_dists)
-    latent_dists_max = torch.max(latent_dists)
-    
-    target_dists_normalized = target_dists / (target_dists_max + eps)
-    latent_dists_normalized = latent_dists / (latent_dists_max + eps)
-    
-    return torch.mean((target_dists_normalized - latent_dists_normalized) ** 2)
-
-@torch.jit.script
-def temporal_smoothness_loss(outputs, outputsT1):
-    return F.mse_loss(outputs, outputsT1)
-
 #@torch.jit.script
 def autoencoder_loss_function(
     outputs: torch.Tensor,
     targets: torch.Tensor,
-    latent_components: torch.Tensor,
     exponential: torch.Tensor = PredefinedTensors.exponential,
     exponential_coefficient: torch.Tensor = PredefinedTensors.AE_exponential_coefficient,
     conservation_weight: torch.Tensor = PredefinedTensors.AE_conservation_weight,
-    structural_weight: torch.Tensor = PredefinedTensors.AE_structural_weight,
     ):
     """
     This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
@@ -421,17 +382,11 @@ def autoencoder_loss_function(
     elementwise_loss = torch.exp(exponential_coefficient * exponential * elementwise_loss) - 1
     elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
     
-    conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets)
+    conservation_error = conservation_weight * calculate_conservation_loss(outputs, targets)    
     
-    structural_loss = structural_weight * calculate_structural_loss(
-        targets, 
-        latent_components
-        )
+    total_loss = (elementwise_loss +  conservation_error) * 1e-3
     
-    
-    total_loss = (elementwise_loss +  conservation_error + structural_loss) * 1e-3
-    
-    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Structure: {structural_loss.detach():.3e} | Total: {total_loss.detach():.3e}")
+    print(f"Recon: {elementwise_loss.detach():.3e} | Cons: {conservation_error.detach():.3e} | Total: {total_loss.detach():.3e}")
     return total_loss
 
 
