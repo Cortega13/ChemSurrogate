@@ -4,7 +4,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from .nn import Autoencoder, Emulator, RecursiveResNet, IterativeResNet
+from .nn import Autoencoder, Emulator, ResidualMLP, IterativeResNet
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
@@ -15,6 +15,8 @@ from . import data_processing as dp
 from .configs import DatasetConfig, AEConfig, EMConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -115,13 +117,12 @@ class Trainer:
                     self.stagnant_epochs = 0
                     self.set_dropout_rate(new_dropout)
                     
-                    # Set learning rate based on dropout value
-                    learning_rate = 1e-3 if new_dropout <= 0.2 else self.model_config.lr
+                    learning_rate = 1e-3 if new_dropout <= 0.1 else self.model_config.lr
                     
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = learning_rate
                     
-                    print(f"Decreasing dropout rate to {self.current_dropout_rate:.4f} and setting learning rate to {learning_rate:.4e}.")
+                    print(f"Decreasing dropout rate to {self.current_dropout_rate:.4f} and settings lr to {learning_rate:.4f}.")
             
             if self.stagnant_epochs == self.model_config.lr_decay_patience+1:
                 print("Reverting to previous best weights")
@@ -537,7 +538,7 @@ def load_skipcon_emulator_objects(is_inference=False):
     for param in ae.parameters():
         param.requires_grad = False
     
-    emulator = RecursiveResNet(
+    emulator = ResidualMLP(
         input_dim = EMConfig.input_dim,
         hidden_dim = EMConfig.hidden_dim,
         output_dim = EMConfig.output_dim,

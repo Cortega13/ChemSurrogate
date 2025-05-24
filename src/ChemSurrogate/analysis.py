@@ -159,7 +159,7 @@ def scatter_abundances_vs_physical_parameters(
     global_maxs = np.log10(combined_df[DatasetConfig.physical_parameters].max())
     
     for species in species_of_interest:
-        fig, axes = plt.subplots(4, 2, figsize=(16, 20))
+        fig, axes = plt.subplots(4, 2, figsize=(12, 16))
         
         for i, varying_param in enumerate(DatasetConfig.physical_parameters):
             df_subset = training_df.sort_values(by=varying_param, ascending=True)
@@ -183,7 +183,7 @@ def scatter_abundances_vs_physical_parameters(
             )
             ax_train.set_xlabel(f"Log {varying_param}")
             ax_train.set_ylabel(f"Log {species} Abundance")
-            ax_train.set_title(f"Training: Log {varying_param} vs. Log {species}")
+            ax_train.set_title(f"Training: Log {species} Abundance vs. Log {varying_param}")
             ax_train.grid(True)
 
             channel_info = (
@@ -200,7 +200,7 @@ def scatter_abundances_vs_physical_parameters(
                 transform=ax_train.transAxes,
                 va='top',
                 ha='left',
-                fontsize=9,
+                fontsize=12,
                 bbox=dict(facecolor='white', alpha=0.7, boxstyle='round')
             )
 
@@ -224,7 +224,7 @@ def scatter_abundances_vs_physical_parameters(
             )
             ax_pred.set_xlabel(f"Log {varying_param}")
             ax_pred.set_ylabel(f"Log {species} Abundance")
-            ax_pred.set_title(f"Predicted: Log {varying_param} vs. Log {species}")
+            ax_pred.set_title(f"Predicted: Log {species} Abundance vs. Log {varying_param}")
             ax_pred.grid(True)
 
             ax_pred.text(
@@ -233,7 +233,7 @@ def scatter_abundances_vs_physical_parameters(
                 transform=ax_pred.transAxes,
                 va='top',
                 ha='left',
-                fontsize=9,
+                fontsize=12,
                 bbox=dict(facecolor='white', alpha=0.7, boxstyle='round')
             )
             
@@ -270,14 +270,14 @@ def plot_error_vs_time(
     errors = errors.cpu().numpy()
     timesteps = np.arange(DatasetConfig.num_timesteps_per_model)
 
-    plt.figure(figsize=(8, 6))
-    plt.scatter(timesteps + 1, errors, label=f'{label}\nMin: {errors.min():.6f}\nMax: {errors.max():.6f}\nMean: {errors.mean():.6f}', color='b', zorder=2)
+    plt.figure(figsize=(7, 5))
+    plt.scatter(timesteps + 1, errors, label=f'{label}\nMin: {errors.min():.1f}%\nMax: {errors.max():.1f}%\nMean: {errors.mean():.1f}%', color='b', zorder=2)
     plt.plot(timesteps + 1, errors, color='b', linewidth=1, alpha=0.7, zorder=1)
 
-    plt.xlabel('Time (x1000 years)')
+    plt.xlabel('Timestep Δt (x1kyr)')
     plt.ylabel(f'{label}')
-    plt.title(f'{label} vs. Time')
-    plt.legend()
+    plt.title(f'{label} vs. Timestep')
+    plt.legend(fontsize=12)
     plt.grid(True)
     plt.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.show()

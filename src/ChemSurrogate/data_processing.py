@@ -876,7 +876,7 @@ def baseAvtoAv(
 
 
 ### Inferencing Functions
-def encoder_inferencing(autoencoder, inputs, batch_size=8192):
+def encoder_inferencing(autoencoder, inputs, batch_size=4*8192):
     num_inputs = inputs.size(0)
         
     encoded_features = []
@@ -891,7 +891,7 @@ def encoder_inferencing(autoencoder, inputs, batch_size=8192):
     return encoded_features
 
 
-def decoder_inferencing(autoencoder, emulated_features, batch_size=8192):
+def decoder_inferencing(autoencoder, emulated_features, batch_size=4*8192):
     decoded_features = []
     for batch_start in range(0, len(emulated_features), batch_size):
         batch_end = min(batch_start + batch_size, len(emulated_features))
@@ -906,7 +906,7 @@ def decoder_inferencing(autoencoder, emulated_features, batch_size=8192):
     return decoded_features
 
 
-def emulator_inferencing(emulator, encoded_inputs, scale_components=True, batch_size=8192):
+def emulator_inferencing(emulator, encoded_inputs, scale_components=True, batch_size=4*8192):
     num_physical_parameters = DatasetConfig.num_physical_parameters
     
     if scale_components:

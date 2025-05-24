@@ -7,6 +7,7 @@ from ChemSurrogate import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 class DatasetConfig:
     working_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # The path to the root folder of the project.
     num_training_models =   60_000    # Each model has a different set of initial physical parameters. They all begin with identical initial abundances.
@@ -46,23 +47,23 @@ class AEConfig:
     # Model Config
     input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
-    hidden_dims = (360, 240)
+    hidden_dims = (320, 200)
     latent_dim = 12
     
     # Hyperparameters Config
-    lr = 1e-2
+    lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 10
     betas = (0.99, 0.999)
     weight_decay = 1e-4
-    exponential_coefficient = 20
+    exponential_coefficient = 40
     conservation_weight = 1e2
-    batch_size = 12*8192
+    batch_size = 8*8192
     stagnant_epoch_patience = 20
-    gradient_clipping = 4
+    gradient_clipping = 2
     dropout_decay_patience = 20
     dropout_reduction_factor = 0.05
-    dropout = 0.3
+    dropout = 0.0
     noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
