@@ -4,12 +4,13 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from .nn import Autoencoder, Emulator, ResidualMLP, IterativeResNet
+from .nn import Autoencoder, ResNetSequential
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
 from torch import nn
 import copy
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from . import data_processing as dp
 from .configs import DatasetConfig, AEConfig, EMConfig
@@ -54,6 +55,15 @@ class Trainer:
         self.stagnant_epochs = 0
         self.loss_per_epoch = []
 
+
+    def print_final_time(self):
+        """
+        Prints the total training time.
+        """
+        end_time = datetime.now()
+        total_time = end_time - self.start_time
+        print(f"Total Training Time: {total_time}")
+        print(f"Total Epochs: {len(self.loss_per_epoch)}")
 
     def _save_checkpoint(self):
         """
@@ -231,106 +241,7 @@ class AutoencoderTrainer(Trainer):
         gc.collect()
         torch.cuda.empty_cache()
         print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
-
-
-class EmulatorTrainer(Trainer):
-    def __init__(
-        self,
-        emulator: torch.nn.Module,
-        autoencoder: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        scheduler: torch.optim.lr_scheduler.ReduceLROnPlateau,
-        training_dataloader: DataLoader,
-        validation_dataloader: DataLoader,
-    ) -> None:
-        """
-        Initializes the EmulatorTrainer, a subclass of Trainer, specialized for train the emulator.
-        """
-        self.ae = autoencoder
-        
-        super().__init__(
-            model_config=EMConfig,
-            model=emulator,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            training_dataloader=training_dataloader,
-            validation_dataloader=validation_dataloader,
-        )
-
-
-    def _run_training_batch(self, features, targets):
-        """
-        Runs a single training batch.
-        """
-        self.optimizer.zero_grad()
-        outputs = self.model(features)
-        outputs = dp.inverse_latent_components_scaling(outputs)
-        outputs = self.ae.decode(outputs)
-        loss = dp.emulator_training_loss_function(outputs, targets)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
-        self.optimizer.step()
-        # for name, param in self.model.named_parameters():
-        #     if param.grad is not None:
-        #         grad_norm = param.grad.norm().item()
-        #         print(f"Gradient norm for {name}: {grad_norm:.4e}")
-     
-
-    def _run_validation_batch(self, features, targets):
-        """
-        Runs a single validation batch.
-        """
-        outputs = self.model(features)
-        outputs = dp.inverse_latent_components_scaling(outputs)
-        outputs = self.ae.decode(outputs)
-        
-        loss = dp.validation_loss_function(outputs, targets)
-        
-        self.epoch_validation_loss += loss
-
-
-    def _run_epoch(self, epoch):
-        """
-        Runs a single epoch of training and validation.
-        """        
-        self.training_dataloader.sampler.set_epoch(epoch)
-        
-        tic1 = datetime.now()
-        self.model.train()
-        for features, targets in self.training_dataloader:
-            features = features.to(device, non_blocking=True)
-            targets = targets.to(device, non_blocking=True)
-            self._run_training_batch(features, targets)
-
-        tic2 = datetime.now()
-        self.model.eval()
-        with torch.no_grad():
-            for features, targets in self.validation_dataloader:
-                features = features.to(device, non_blocking=True)
-                targets = targets.to(device, non_blocking=True)
-                self._run_validation_batch(features, targets)
-        
-        toc = datetime.now()
-        print(f"Training Time: {tic2 - tic1} | Validation Time: {toc - tic2}")
-
-
-    def train(self):
-        """
-        Training loop for the model. Runs until the minimum loss stagnates for a number of epochs.
-        """
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        for epoch in range(999999):
-            self._run_epoch(epoch)
-            self._check_minimum_loss()
-            if self._check_early_stopping():
-                break
-        
-        gc.collect()
-        torch.cuda.empty_cache()
-        print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
+        self.print_final_time()
 
 
 class EmulatorTrainerSequential(Trainer):
@@ -358,35 +269,31 @@ class EmulatorTrainerSequential(Trainer):
         )
 
 
-    def _run_training_batch(self, features, targets):
+    def _run_training_batch(self, physical_parameters, features, targets):
         """
         Runs a single training batch.
         """
         self.optimizer.zero_grad()
-        outputs = self.model(features, targets.size(1))
-        
-        outputs = outputs.reshape(-1, 12)
+        outputs = self.model(physical_parameters, features, targets.size(1))
+        outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
-        outputs = outputs.reshape(targets.size(0), targets.size(1), -1)
+        
+        targets = targets.reshape(-1, 333)
         
         loss = dp.emulator_training_loss_function(outputs, targets)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
         self.optimizer.step()
-        # for name, param in self.model.named_parameters():
-        #     if param.grad is not None:
-        #         grad_norm = param.grad.norm().item()
-        #         print(f"Gradient norm for {name}: {grad_norm:.4e}")
         
 
-    def _run_validation_batch(self, features, targets):
+    def _run_validation_batch(self, physical_parameters, features, targets):
         """
         Runs a single validation batch.
         """
-        outputs = self.model(features, targets.size(1))
+        outputs = self.model(physical_parameters, features, targets.size(1))
         
-        outputs = outputs.reshape(-1, 12)
+        outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
         outputs = outputs.reshape(targets.size(0), targets.size(1), -1)
@@ -398,25 +305,52 @@ class EmulatorTrainerSequential(Trainer):
 
     def _run_epoch(self, epoch):
         """
-        Runs a single epoch of training and validation.
-        """        
+        Runs a single epoch of training and validation, profiling the first 10 training batches.
+        """
         self.training_dataloader.sampler.set_epoch(epoch)
-        
         tic1 = datetime.now()
+
         self.model.train()
-        for features, targets in self.training_dataloader:
+
+        # # Set up profiler
+        # with profile(
+        #     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        #     schedule=torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1),
+        #     on_trace_ready=torch.profiler.tensorboard_trace_handler("logs"),
+        #     record_shapes=True,
+        #     with_stack=True,
+        #     profile_memory=True,
+        #     with_flops=True
+        # ) as prof:
+        #     for batch_idx, (physical_parameters, features, targets) in enumerate(self.training_dataloader):
+        #         physical_parameters = physical_parameters.to(device, non_blocking=True)
+        #         features = features.to(device, non_blocking=True)
+        #         targets = targets.to(device, non_blocking=True)
+
+        #         with record_function("training_batch"):
+        #             self._run_training_batch(physical_parameters, features, targets)
+
+        #         prof.step()
+
+        #         if batch_idx >= 9:
+        #             break  # Only profile the first 10 batches
+
+        for physical_parameters, features, targets in self.training_dataloader:
+            physical_parameters = physical_parameters.to(device, non_blocking=True)
             features = features.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
-            self._run_training_batch(features, targets)
+            self._run_training_batch(physical_parameters, features, targets)
 
         tic2 = datetime.now()
+
         self.model.eval()
         with torch.no_grad():
-            for features, targets in self.validation_dataloader:
+            for physical_parameters, features, targets in self.validation_dataloader:
+                physical_parameters = physical_parameters.to(device, non_blocking=True)
                 features = features.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
-                self._run_validation_batch(features, targets)
-        
+                self._run_validation_batch(physical_parameters, features, targets)
+
         toc = datetime.now()
         print(f"Training Time: {tic2 - tic1} | Validation Time: {toc - tic2}")
 
@@ -438,7 +372,7 @@ class EmulatorTrainerSequential(Trainer):
         gc.collect()
         torch.cuda.empty_cache()
         print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
-
+        self.print_final_time()
 
 
 def load_autoencoder_objects(is_inference=False):
@@ -479,53 +413,7 @@ def load_autoencoder_objects(is_inference=False):
     return ae, optimizer, scheduler
 
 
-def load_emulator_objects(is_inference=False):
-    ae = Autoencoder(
-        input_dim=AEConfig.input_dim,
-        latent_dim=AEConfig.latent_dim,
-        hidden_dims=AEConfig.hidden_dims,
-    ).to(device)
-    if os.path.exists(AEConfig.pretrained_model_path):
-        ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
-    
-    ae.eval()
-    for param in ae.parameters():
-        param.requires_grad = False
-
-    emulator = Emulator(
-        input_dim=EMConfig.input_dim,
-        output_dim=EMConfig.output_dim,
-        hidden_layer=EMConfig.hidden_dim,
-        dropout=0.0 if is_inference else EMConfig.dropout,
-    ).to(device)
-    if os.path.exists(EMConfig.pretrained_model_path):
-        print("Loading Pretrained Model")
-        emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path))
-
-    if is_inference:
-        emulator.eval()
-        for param in emulator.parameters():
-            param.requires_grad = False
-    
-    optimizer = optim.AdamW(
-        emulator.parameters(),
-        lr=EMConfig.lr,
-        betas=EMConfig.betas,
-        weight_decay=EMConfig.weight_decay,
-        fused=True,
-    )
-    
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=EMConfig.lr_decay,
-        patience=EMConfig.lr_decay_patience,
-    )
-
-    return emulator, ae, optimizer, scheduler
-
-
-def load_skipcon_emulator_objects(is_inference=False):
+def load_iterative_emulator_objects(is_inference=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
         latent_dim=AEConfig.latent_dim,
@@ -538,7 +426,7 @@ def load_skipcon_emulator_objects(is_inference=False):
     for param in ae.parameters():
         param.requires_grad = False
     
-    emulator = ResidualMLP(
+    emulator = ResNetSequential(
         input_dim = EMConfig.input_dim,
         hidden_dim = EMConfig.hidden_dim,
         output_dim = EMConfig.output_dim,
@@ -575,60 +463,4 @@ def load_skipcon_emulator_objects(is_inference=False):
     total_params = sum(p.numel() for p in emulator.parameters())
     print(f"Total Parameters: {total_params}")
 
-    return emulator, ae, optimizer, scheduler
-
-
-def load_iterative_emulator_objects(is_inference=False, final_training_phase=False):
-    ae = Autoencoder(
-        input_dim=AEConfig.input_dim,
-        latent_dim=AEConfig.latent_dim,
-        hidden_dims=AEConfig.hidden_dims,
-    ).to(device)
-    if os.path.exists(AEConfig.pretrained_model_path):
-        ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
-    
-    ae.eval()
-    for param in ae.parameters():
-        param.requires_grad = False
-    
-    emulator = IterativeResNet(
-        input_dim = EMConfig.input_dim,
-        hidden_dim = EMConfig.hidden_dim,
-        output_dim = EMConfig.output_dim,
-        dropout = EMConfig.dropout,
-        num_blocks=EMConfig.num_blocks,
-    ).to(device)
-    
-    if os.path.exists(EMConfig.pretrained_model_path):
-        print("Loading Pretrained Model")
-        emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path, weights_only=True))
-
-    
-    if is_inference:
-        print("Inference Mode Activated (parameters frozen)")
-        emulator.eval()
-        for param in emulator.parameters():
-            param.requires_grad = False
-    elif final_training_phase:
-        print(f"Final Training Phase Activated (batchnorm frozen)")
-        freeze_bn_layers(emulator)
-
-    optimizer = optim.AdamW(
-        emulator.parameters(),
-        lr=EMConfig.lr,
-        betas=EMConfig.betas,
-        weight_decay=EMConfig.weight_decay,
-        fused=True,
-    )
-    
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=EMConfig.lr_decay,
-        patience=EMConfig.lr_decay_patience,
-    )
-    
-    total_params = sum(p.numel() for p in emulator.parameters())
-    print(f"Total Parameters: {total_params}")
-
-    return emulator, ae, optimizer, scheduler
+    return ae, emulator, optimizer, scheduler
