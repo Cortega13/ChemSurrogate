@@ -76,7 +76,7 @@ class EMConfig:
     hidden_dim = 16
     output_dim = AEConfig.latent_dim
     num_blocks = 8
-    window_size = 4
+    window_size = 48
     
     # Hyperparameters Config
     lr = 1e-3
@@ -87,14 +87,14 @@ class EMConfig:
     loss_scaling_factor = 1e-3
     exponential_coefficient = 20
     alpha = 1e3
-    batch_size = 8192
+    batch_size = 2048
     stagnant_epoch_patience = 20
     gradient_clipping = 2
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/resnet.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/resnet.pth")
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/lstm.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/lstm.pth")
     dropout_decay_patience = 8
     dropout_reduction_factor = 0.05
-    dropout = 0.1
+    dropout = 0.0
     save_model = True
     shuffle = True
     shuffle_chunk_size = 1

@@ -324,8 +324,8 @@ class EmulatorSequenceDataset(Dataset):
         
         rows = self.data_matrix[data_indices]
         
-        physical_parameters = rows[:, :, 1+self.num_metadata: 1+self.num_metadata+self.num_physical_parameters]
-        features = rows[:, 0, -self.num_components:]
+        physical_parameters = rows[:, :-1, 1+self.num_metadata: 1+self.num_metadata+self.num_physical_parameters]
+        features = rows[:, :, -self.num_components:]
         targets = rows[:, 1:, 1+self.num_metadata+self.num_physical_parameters:-self.num_components]
                 
         return physical_parameters, features, targets

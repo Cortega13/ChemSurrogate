@@ -102,3 +102,43 @@ class ResNetSequential(nn.Module):
             outputs.append(x)
         
         return torch.stack(outputs, dim=1)
+    
+
+class ChemSeq2Seq(nn.Module):
+    def __init__(self, num_physical_features, latent_dim,
+                 enc_hidden=256, dec_hidden=256, attn_dim=32,
+                 teacher_force_prob=0.5):
+        super().__init__()
+        self.p_tf = teacher_force_prob
+        self.enc  = nn.LSTM(num_physical_features, enc_hidden,
+                            batch_first=True, bidirectional=False)
+        self.dec  = nn.LSTMCell(latent_dim + num_physical_features + enc_hidden,
+                                dec_hidden)
+        self.W_h  = nn.Linear(enc_hidden, attn_dim, bias=False)
+        self.W_s  = nn.Linear(dec_hidden, attn_dim, bias=False)
+        self.v    = nn.Linear(attn_dim, 1, bias=False)
+        self.proj = nn.Linear(dec_hidden + enc_hidden, latent_dim)
+        self.init_h = nn.Linear(latent_dim, dec_hidden)
+        self.init_c = nn.Linear(latent_dim, dec_hidden)
+
+    def forward(self, phys, comps):
+        B, T, _ = phys.shape
+        enc_out, _ = self.enc(phys)
+        enc_proj = self.W_h(enc_out)
+        h = torch.tanh(self.init_h(comps[:, 0]))
+        c = torch.tanh(self.init_c(comps[:, 0]))
+        prev = comps[:, 0]
+        outs = []
+        for t in range(T):
+            e = torch.tanh(enc_proj[:, :t+1] + self.W_s(h)[:, None])
+            alpha = torch.softmax(self.v(e).squeeze(-1), -1)
+            ctx = (alpha.unsqueeze(1) @ enc_out[:, :t+1]).squeeze(1)
+            h, c = self.dec(torch.cat((prev, phys[:, t], ctx), -1), (h, c))
+            pred = self.proj(torch.cat((h, ctx), -1))
+            outs.append(pred)
+            if self.training and t < T - 1:
+                m = (torch.rand(B, 1, device=phys.device) < self.p_tf).float()
+                prev = m * comps[:, t + 1] + (1 - m) * pred.detach()
+            else:
+                prev = pred.detach()
+        return torch.stack(outs, 1)

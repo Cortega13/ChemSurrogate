@@ -4,7 +4,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from .nn import Autoencoder, ResNetSequential
+from .nn import Autoencoder, ResNetSequential, ChemSeq2Seq
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
@@ -274,7 +274,12 @@ class EmulatorTrainerSequential(Trainer):
         Runs a single training batch.
         """
         self.optimizer.zero_grad()
-        outputs = self.model(physical_parameters, features, targets.size(1))
+        # print(physical_parameters.shape, features.shape, targets.shape)
+        
+        
+        outputs = self.model(physical_parameters, features)
+        # print(outputs.shape)
+        # print()
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
@@ -291,7 +296,7 @@ class EmulatorTrainerSequential(Trainer):
         """
         Runs a single validation batch.
         """
-        outputs = self.model(physical_parameters, features, targets.size(1))
+        outputs = self.model(physical_parameters, features)
         
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
@@ -426,12 +431,9 @@ def load_iterative_emulator_objects(is_inference=False):
     for param in ae.parameters():
         param.requires_grad = False
     
-    emulator = ResNetSequential(
-        input_dim = EMConfig.input_dim,
-        hidden_dim = EMConfig.hidden_dim,
-        output_dim = EMConfig.output_dim,
-        dropout = EMConfig.dropout,
-        num_blocks=EMConfig.num_blocks,
+    emulator = ChemSeq2Seq(
+        num_physical_features=4,
+        latent_dim=14,
     ).to(device)
     
     if os.path.exists(EMConfig.pretrained_model_path):
