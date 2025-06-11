@@ -76,12 +76,12 @@ class EMConfig:
     hidden_dim = 16
     output_dim = AEConfig.latent_dim
     num_blocks = 8
-    window_size = 48
+    window_size = 50
     
     # Hyperparameters Config
-    lr = 1e-3
+    lr = 2e-4
     lr_decay = 0.5
-    lr_decay_patience = 10
+    lr_decay_patience = 4
     betas = (0.99, 0.999)
     weight_decay = 1e-4
     loss_scaling_factor = 1e-3
