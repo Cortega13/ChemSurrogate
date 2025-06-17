@@ -11,6 +11,7 @@ from torch.backends import cudnn
 from torch import nn
 import copy
 from torch.profiler import profile, record_function, ProfilerActivity
+from torch.nn import functional as F
 
 from . import data_processing as dp
 from .configs import DatasetConfig, AEConfig, EMConfig
@@ -64,6 +65,7 @@ class Trainer:
         total_time = end_time - self.start_time
         print(f"Total Training Time: {total_time}")
         print(f"Total Epochs: {len(self.loss_per_epoch)}")
+
 
     def _save_checkpoint(self):
         """
@@ -143,6 +145,31 @@ class Trainer:
         print()
         print(f"Current Learning Rate: {self.optimizer.param_groups[0]['lr']:.3e}")
         print(f"Current Dropout Rate: {self.current_dropout_rate:.4f}")
+        print(f"Current Num Epochs: {len(self.loss_per_epoch)}")
+
+
+    def _run_epoch(self, epoch):
+        return NotImplementedError("This method should be implemented in subclasses.")
+
+
+    def train(self):
+        """
+        Training loop for the autoencoder. Runs until the minimum loss stagnates for a number of epochs.
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        for epoch in range(999999):
+            self._run_epoch(epoch)
+            self._check_minimum_loss()
+            if self._check_early_stopping():
+                break
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
+        self.print_final_time()
 
 
 class AutoencoderTrainer(Trainer):
@@ -224,26 +251,6 @@ class AutoencoderTrainer(Trainer):
         print(f"Training Time: {tic2 - tic1} | Validation Time: {toc - tic2}\n")
 
 
-    def train(self):
-        """
-        Training loop for the autoencoder. Runs until the minimum loss stagnates for a number of epochs.
-        """
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-
-        for epoch in range(999999):
-            self._run_epoch(epoch)
-            self._check_minimum_loss()
-            if self._check_early_stopping():
-                break
-
-        gc.collect()
-        torch.cuda.empty_cache()
-        print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
-        self.print_final_time()
-
-
 class EmulatorTrainerSequential(Trainer):
     def __init__(
         self,
@@ -273,13 +280,19 @@ class EmulatorTrainerSequential(Trainer):
         """
         Runs a single training batch.
         """
-        self.optimizer.zero_grad()
-        # print(physical_parameters.shape, features.shape, targets.shape)
+        self.optimizer.zero_grad()        
         
+        #outputs = self.model(physical_parameters, features)
         
-        outputs = self.model(physical_parameters, features)
-        # print(outputs.shape)
-        # print()
+        T = targets.size(1)
+        previous_comps = features[:, :1, :]
+        for t in range(1, T+1):
+            previous_phys = physical_parameters[:, :t, :]
+            next_comp = self.model(previous_phys, previous_comps)[:, -1:, :]
+            previous_comps = torch.cat([previous_comps, next_comp], dim=1)
+        
+        outputs = previous_comps[:, 1:, :]
+
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
@@ -296,7 +309,17 @@ class EmulatorTrainerSequential(Trainer):
         """
         Runs a single validation batch.
         """
-        outputs = self.model(physical_parameters, features)
+        
+        T = targets.size(1)
+        previous_comps = features[:, :1, :]
+        for t in range(1, T+1):
+            previous_phys = physical_parameters[:, :t, :]
+            next_comp = self.model(previous_phys, previous_comps)[:, -1:, :]
+            previous_comps = torch.cat([previous_comps, next_comp], dim=1)
+        
+        outputs = previous_comps[:, 1:, :]
+           
+        #outputs = self.model(physical_parameters, features)
         
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
@@ -305,7 +328,7 @@ class EmulatorTrainerSequential(Trainer):
         
         loss = dp.validation_loss_function(outputs, targets).mean(dim=0)
         
-        self.epoch_validation_loss += loss
+        self.epoch_validation_loss += loss.detach()
 
 
     def _run_epoch(self, epoch):
@@ -360,26 +383,6 @@ class EmulatorTrainerSequential(Trainer):
         print(f"Training Time: {tic2 - tic1} | Validation Time: {toc - tic2}")
 
 
-    def train(self):
-        """
-        Training loop for the model. Runs until the minimum loss stagnates for a number of epochs.
-        """
-        gc.collect()
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        for epoch in range(999999):
-            self._run_epoch(epoch)
-            self._check_minimum_loss()
-            if self._check_early_stopping():
-                break
-        
-        gc.collect()
-        torch.cuda.empty_cache()
-        print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
-        self.print_final_time()
-
-
 def load_autoencoder_objects(is_inference=False):
     ae = Autoencoder(
         input_dim=AEConfig.input_dim,
@@ -432,8 +435,8 @@ def load_iterative_emulator_objects(is_inference=False):
         param.requires_grad = False
     
     emulator = ChemSeq2Seq(
-        num_physical_features=4,
-        latent_dim=14,
+        num_phys=4,
+        num_chem=14,
     ).to(device)
     
     if os.path.exists(EMConfig.pretrained_model_path):

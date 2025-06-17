@@ -8,13 +8,13 @@ from ChemSurrogate.configs import (
 )
 
 if __name__ == "__main__":
-    training_np, validation_np = dp.load_datasets(EMConfig.columns)
+    # training_np, validation_np = dp.load_datasets(EMConfig.columns)
     
-    training_dataset = dp.prepare_emulator_dataset(training_np)
-    validation_dataset = dp.prepare_emulator_dataset(validation_np)
+    # training_dataset = dp.prepare_emulator_dataset(training_np)
+    # validation_dataset = dp.prepare_emulator_dataset(validation_np)
     
-    dp.save_tensors_to_hdf5(training_dataset, category="training_seq")
-    dp.save_tensors_to_hdf5(validation_dataset, category="validation_seq")
+    # dp.save_tensors_to_hdf5(training_dataset, category="training_seq")
+    # dp.save_tensors_to_hdf5(validation_dataset, category="validation_seq")
 
     training_dataset, training_indices = dp.load_tensors_from_hdf5(category="training_seq")
     validation_dataset, validation_indices = dp.load_tensors_from_hdf5(category="validation_seq")

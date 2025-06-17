@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 class Autoencoder(nn.Module):
     def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.1, dropout=0.0):
@@ -102,51 +103,50 @@ class ResNetSequential(nn.Module):
             outputs.append(x)
         
         return torch.stack(outputs, dim=1)
-    
+
 
 class ChemSeq2Seq(nn.Module):
-    def __init__(self, num_physical_features, latent_dim,
-                 enc_hidden=128, dec_hidden=128, attn_dim=32,
-                 teacher_force_prob=0.05):
+    def __init__(self, num_phys, num_chem, d_model=64,
+                 nhead=8, num_layers=2, ff_mult=4, max_len=256):
         super().__init__()
-        self.p_tf = teacher_force_prob
-        self.enc  = nn.LSTM(num_physical_features, enc_hidden,
-                            batch_first=True, bidirectional=False)
-        self.dec  = nn.LSTMCell(latent_dim + num_physical_features + enc_hidden,
-                                dec_hidden)
-        self.W_h  = nn.Linear(enc_hidden, attn_dim, bias=False)
-        self.W_s  = nn.Linear(dec_hidden, attn_dim, bias=False)
-        self.v    = nn.Linear(attn_dim, 1, bias=False)
-        self.norm = nn.RMSNorm(dec_hidden)
-        self.proj = nn.Linear(dec_hidden + enc_hidden, latent_dim)
-        self.init_h = nn.Linear(latent_dim, dec_hidden)
-        self.init_c = nn.Linear(latent_dim, dec_hidden)
+        self.phys_proj = nn.Linear(num_phys, d_model, bias=False)
+        self.chem_proj = nn.Linear(num_chem, d_model, bias=False)
+        self.pos = nn.Parameter(torch.randn(max_len, d_model) / math.sqrt(d_model))
+        enc = nn.TransformerEncoderLayer(d_model, nhead, ff_mult * d_model,
+                                         batch_first=True, norm_first=False)
+        self.tr = nn.TransformerEncoder(enc, num_layers)
+        self.out = nn.Linear(d_model, num_chem)
+        
+        mask = torch.triu(torch.full((max_len, max_len), float('-inf')), 1)
+        self.register_buffer('causal_mask', mask)
 
     def forward(self, phys, comps):
-        B, T, _   = phys.shape
-        enc_out,_ = self.enc(phys)
-        enc_proj  = self.W_h(enc_out)
-        h = torch.tanh(self.init_h(comps[:, 0]))
-        c = torch.tanh(self.init_c(comps[:, 0]))
-        prev = comps[:, 0]
-        outs = []
+        x = self.phys_proj(phys) + self.chem_proj(comps)
+        x = x + self.pos[:phys.size(1)]
+        
+        seq_len = phys.size(1)
+        mask = self.causal_mask[:seq_len, :seq_len].to(phys.device)
+        h = self.tr(x, mask=mask)
 
-        for t in range(T):
-            e      = torch.tanh(enc_proj[:, :t+1] + self.W_s(h)[:, None])
-            alpha  = torch.softmax(self.v(e).squeeze(-1), -1)
-            ctx    = (alpha.unsqueeze(1) @ enc_out[:, :t+1]).squeeze(1)
+        delta = self.out(h)
+        return comps + delta
+    
 
-            h, c   = self.dec(torch.cat((prev, phys[:, t], ctx), -1), (h, c))
-            h      = self.norm(h)
-
-            delta  = self.proj(torch.cat((h, ctx), -1))
-            pred = prev + delta
-            outs.append(pred)
-
-            if self.training and t < T - 1:
-                m    = (torch.rand(B, 1, device=phys.device) < self.p_tf).float()
-                prev = m * comps[:, t + 1] + (1 - m) * pred.detach()
-            else:
-                prev = pred.detach()
-
-        return torch.stack(outs, 1)
+class MLP(nn.Module):
+    def __init__(self, input_dim=18, output_dim=14, hidden_dim=128, dropout=0.0):
+        super(MLP, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim, output_dim)
+        )
+        
+    def forward(self, x):
+        x = self.net(x)
+        return x

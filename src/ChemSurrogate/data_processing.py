@@ -325,9 +325,9 @@ class EmulatorSequenceDataset(Dataset):
         rows = self.data_matrix[data_indices]
         
         physical_parameters = rows[:, :-1, 1+self.num_metadata: 1+self.num_metadata+self.num_physical_parameters]
-        features = rows[:, :, -self.num_components:]
+        features = rows[:, :-1, -self.num_components:]
         targets = rows[:, 1:, 1+self.num_metadata+self.num_physical_parameters:-self.num_components]
-                
+        
         return physical_parameters, features, targets
 
 
@@ -542,7 +542,8 @@ def prepare_autoencoder_dataset(
 
 
 def prepare_emulator_dataset(
-    dataset_np: np.array, 
+    dataset_np: np.array,
+    window_size: int = EMConfig.window_size
     ):
     """
     Generates index pairs for training.
@@ -563,7 +564,7 @@ def prepare_emulator_dataset(
     latent_components = encode_dataset(dataset_np[:, num_metadata+1+num_params:])
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
     
-    index_pairs_np = calculate_emulator_indices_sequential(encoded_dataset_np, EMConfig.window_size)
+    index_pairs_np = calculate_emulator_indices_sequential(encoded_dataset_np, window_size)
     
     perm = np.random.permutation(len(index_pairs_np))
     index_pairs_shuffled_np = index_pairs_np[perm]

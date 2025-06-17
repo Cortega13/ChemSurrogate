@@ -73,13 +73,11 @@ class EMConfig:
     num_columns = len(columns)
     # Model Config
     input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim
-    hidden_dim = 16
     output_dim = AEConfig.latent_dim
-    num_blocks = 8
-    window_size = 50
+    window_size = 32
     
     # Hyperparameters Config
-    lr = 2e-4
+    lr = 5e-4
     lr_decay = 0.5
     lr_decay_patience = 4
     betas = (0.99, 0.999)
@@ -87,11 +85,11 @@ class EMConfig:
     loss_scaling_factor = 1e-3
     exponential_coefficient = 20
     alpha = 1e3
-    batch_size = 2048
+    batch_size = int(1024)
     stagnant_epoch_patience = 20
     gradient_clipping = 2
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/lstm.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/lstm.pth")
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/transformer.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "models/transformer.pth")
     dropout_decay_patience = 8
     dropout_reduction_factor = 0.05
     dropout = 0.0
