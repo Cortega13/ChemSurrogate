@@ -4,7 +4,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from .nn import Autoencoder, ResNetSequential, ChemSeq2Seq
+from ...scripts.autoencoder.nn import Autoencoder, ResNetSequential, ChemSeq2Seq, MLP
 from torch import optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
@@ -276,57 +276,38 @@ class EmulatorTrainerSequential(Trainer):
         )
 
 
-    def _run_training_batch(self, physical_parameters, features, targets):
+    def _run_training_batch(self, phys, features, targets):
         """
         Runs a single training batch.
         """
         self.optimizer.zero_grad()        
         
-        #outputs = self.model(physical_parameters, features)
+        outputs = self.model(phys, features)
         
-        T = targets.size(1)
-        previous_comps = features[:, :1, :]
-        for t in range(1, T+1):
-            previous_phys = physical_parameters[:, :t, :]
-            next_comp = self.model(previous_phys, previous_comps)[:, -1:, :]
-            previous_comps = torch.cat([previous_comps, next_comp], dim=1)
-        
-        outputs = previous_comps[:, 1:, :]
-
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
-        
         targets = targets.reshape(-1, 333)
         
-        loss = dp.emulator_training_loss_function(outputs, targets)
+        loss = self.training_loss(outputs, targets)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), EMConfig.gradient_clipping)
         self.optimizer.step()
         
 
-    def _run_validation_batch(self, physical_parameters, features, targets):
+    def _run_validation_batch(self, phys, features, targets):
         """
         Runs a single validation batch.
         """
         
-        T = targets.size(1)
-        previous_comps = features[:, :1, :]
-        for t in range(1, T+1):
-            previous_phys = physical_parameters[:, :t, :]
-            next_comp = self.model(previous_phys, previous_comps)[:, -1:, :]
-            previous_comps = torch.cat([previous_comps, next_comp], dim=1)
-        
-        outputs = previous_comps[:, 1:, :]
-           
-        #outputs = self.model(physical_parameters, features)
+        outputs = self.model(phys, features)
         
         outputs = outputs.reshape(-1, AEConfig.latent_dim)
         outputs = dp.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
-        outputs = outputs.reshape(targets.size(0), targets.size(1), -1)
+        targets = targets.reshape(-1, 333)
         
-        loss = dp.validation_loss_function(outputs, targets).mean(dim=0)
+        loss = self.validation_loss(outputs, targets).mean(dim=0)
         
         self.epoch_validation_loss += loss.detach()
 
@@ -383,42 +364,26 @@ class EmulatorTrainerSequential(Trainer):
         print(f"Training Time: {tic2 - tic1} | Validation Time: {toc - tic2}")
 
 
-def load_autoencoder_objects(is_inference=False):
-    ae = Autoencoder(
-        input_dim=AEConfig.input_dim,
-        latent_dim=AEConfig.latent_dim,
-        hidden_dims=AEConfig.hidden_dims,
-        noise=0.0 if is_inference else AEConfig.noise,
-        dropout=0.0 if is_inference else AEConfig.dropout,
-    ).to(device)
-    if os.path.exists(AEConfig.pretrained_model_path):
-        print("Loading Pretrained Model")
-        ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
-
-    if is_inference:
-        ae.eval()
-        for param in ae.parameters():
-            param.requires_grad = False    
-
+def load_objects(model, config):
     optimizer = optim.AdamW(
-        ae.parameters(),
-        lr=AEConfig.lr,
-        betas=AEConfig.betas,
-        weight_decay=AEConfig.weight_decay,
+        model.parameters(),
+        lr=config.lr,
+        betas=config.betas,
+        weight_decay=config.weight_decay,
         fused=True,
     )
     
     scheduler = ReduceLROnPlateau(
         optimizer,
         mode="min",
-        factor=AEConfig.lr_decay,
-        patience=AEConfig.lr_decay_patience,
+        factor=config.lr_decay,
+        patience=config.lr_decay_patience,
     )
 
-    total_params = sum(p.numel() for p in ae.parameters())
+    total_params = sum(p.numel() for p in model.parameters())
     print(f"Total Parameters: {total_params}")
 
-    return ae, optimizer, scheduler
+    return optimizer, scheduler
 
 
 def load_iterative_emulator_objects(is_inference=False):
@@ -437,6 +402,54 @@ def load_iterative_emulator_objects(is_inference=False):
     emulator = ChemSeq2Seq(
         num_phys=4,
         num_chem=14,
+    ).to(device)
+    
+    if os.path.exists(EMConfig.pretrained_model_path):
+        print("Loading Pretrained Model")
+        emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path, weights_only=True))
+
+    
+    if is_inference:
+        print("Inference Mode Activated (parameters frozen)")
+        emulator.eval()
+        for param in emulator.parameters():
+            param.requires_grad = False
+
+    optimizer = optim.AdamW(
+        emulator.parameters(),
+        lr=EMConfig.lr,
+        betas=EMConfig.betas,
+        weight_decay=EMConfig.weight_decay,
+        fused=True,
+    )
+    
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=EMConfig.lr_decay,
+        patience=EMConfig.lr_decay_patience,
+    )
+    
+    total_params = sum(p.numel() for p in emulator.parameters())
+    print(f"Total Parameters: {total_params}")
+
+    return ae, emulator, optimizer, scheduler
+
+
+def load_mlp_emulator_objects(is_inference=False):
+    ae = Autoencoder(
+        input_dim=AEConfig.input_dim,
+        latent_dim=AEConfig.latent_dim,
+        hidden_dims=AEConfig.hidden_dims,
+    ).to(device)
+    if os.path.exists(AEConfig.pretrained_model_path):
+        ae.load_state_dict(torch.load(AEConfig.pretrained_model_path))
+    
+    ae.eval()
+    for param in ae.parameters():
+        param.requires_grad = False
+    
+    emulator = MLP(
     ).to(device)
     
     if os.path.exists(EMConfig.pretrained_model_path):

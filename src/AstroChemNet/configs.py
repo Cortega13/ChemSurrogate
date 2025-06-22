@@ -3,7 +3,7 @@ import os
 from joblib import load
 import torch
 import importlib.resources as pkg_resources
-from ChemSurrogate import utils
+from AstroChemNet import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,7 +17,7 @@ class DatasetConfig:
     num_species = 333
     physical_parameter_ranges = {
         "Density":  (68481, 1284211415),       # H nuclei per cm^3. Limits arbitrarily chosen.
-        "radfield": (1e-2, 26),     # Habing field. Limits arbitrarily chosen.
+        "Radfield": (1e-2, 26),     # Habing field. Limits arbitrarily chosen.
         "Av":       (1e-1, 6914),    # Magnitudes. Limits arbitrarily choisen.
         "gasTemp":  (13, 133),      # Kelvin. Grain reactions are too complex under 10 K. Ice mostly sublimates at 150 K and UCLChem sets it as a strict constraint.
     }
@@ -30,7 +30,7 @@ class DatasetConfig:
     stoichiometric_matrix_path = os.path.join(working_path, "utils/stoichiometric_matrix.npy")
     stoichiometric_matrix = np.load(stoichiometric_matrix_path)
     
-    metadata = ["Tracer", "Time"]
+    metadata = ["Index", "Model", "Time"]
     physical_parameters = list(physical_parameter_ranges.keys())
     species_path = os.path.join(working_path, "utils/species.txt")
     species = np.loadtxt(species_path, dtype=str, delimiter=" ", comments=None).tolist()
@@ -40,7 +40,7 @@ class DatasetConfig:
 class AEConfig:
     columns = DatasetConfig.species
     num_columns = len(columns)
-    component_scalers_path = os.path.join(DatasetConfig.working_path, "utils/component_scalers.npy")
+    latents_minmax_path = os.path.join(DatasetConfig.working_path, "utils/latents_minmax.npy")
     # Model Config
     input_dim = DatasetConfig.num_species
     output_dim = DatasetConfig.num_species
@@ -64,8 +64,8 @@ class AEConfig:
     noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/autoencoder.pth")
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "weights/autoencoder.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "weights/autoencoder.pth")
 
     
 class EMConfig:
@@ -74,10 +74,10 @@ class EMConfig:
     # Model Config
     input_dim = DatasetConfig.num_physical_parameters + AEConfig.latent_dim
     output_dim = AEConfig.latent_dim
-    window_size = 32
+    window_size = 240
     
     # Hyperparameters Config
-    lr = 5e-4
+    lr = 2e-4
     lr_decay = 0.5
     lr_decay_patience = 4
     betas = (0.99, 0.999)
@@ -88,8 +88,8 @@ class EMConfig:
     batch_size = int(1024)
     stagnant_epoch_patience = 20
     gradient_clipping = 2
-    pretrained_model_path = os.path.join(DatasetConfig.working_path, "models/transformer.pth")
-    save_model_path = os.path.join(DatasetConfig.working_path, "models/transformer.pth")
+    pretrained_model_path = os.path.join(DatasetConfig.working_path, "weights/mlp.pth")
+    save_model_path = os.path.join(DatasetConfig.working_path, "weights/mlp.pth")
     dropout_decay_patience = 8
     dropout_reduction_factor = 0.05
     dropout = 0.0
@@ -98,7 +98,7 @@ class EMConfig:
     shuffle_chunk_size = 1
 
 
-class PredefinedTensors:
+class PredefinedTensors:        
     ab_min = torch.tensor(np.log10(DatasetConfig.abundances_lower_clipping), device=device).float()
     ab_max = torch.tensor(np.log10(DatasetConfig.abundances_upper_clipping), device=device).float()
 
