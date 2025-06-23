@@ -13,18 +13,25 @@ from .inference import Inference
 
 
 class Processing():
-    def __init__(self, GeneralConfig, AEConfig=None, EMConfig=None):
-        self.exponential = torch.tensor()
+    def __init__(self, GeneralConfig, AEConfig=None):
+        self.device = GeneralConfig.device
+        self.exponential = torch.log(torch.tensor(10, device=self.device).float())
         
-        self.abundances_min = torch.tensor(GeneralConfig.abundances_lower_clipping, dtype=torch.float32, device=GeneralConfig.device)
-        self.abundances_max = torch.tensor(GeneralConfig.abundances_upper_clipping, dtype=torch.float32, device=GeneralConfig.device)
+        self.abundances_min = torch.tensor(np.log10(GeneralConfig.abundances_lower_clipping), dtype=torch.float32, device=self.device)
+        self.abundances_max = torch.tensor(np.log10(GeneralConfig.abundances_upper_clipping), dtype=torch.float32, device=self.device)
+        self.abundances_min_np = self.abundances_min.cpu().numpy()
+        self.abundances_max_np = self.abundances_max.cpu().numpy()
         
         if AEConfig is not None:
             latents_minmax = np.load(AEConfig.latents_minmax_path)
-            self.components_min = torch.tensor(latents_minmax[0], dtype=torch.float32, device=GeneralConfig.device)
-            self.components_max = torch.tensor(latents_minmax[1], dtype=torch.float32, device=GeneralConfig.device)
+            print(f"Latents MinMax: {latents_minmax[0]}, {latents_minmax[1]}")
+            self.components_min = torch.tensor(latents_minmax[0], dtype=torch.float32, device=self.device)
+            self.components_max = torch.tensor(latents_minmax[1], dtype=torch.float32, device=self.device)
                 
         self.physical_parameter_ranges= GeneralConfig.physical_parameter_ranges
+        self.species = GeneralConfig.species
+        self.num_species = GeneralConfig.num_species
+        self.stoichiometric_matrix_path = GeneralConfig.stoichiometric_matrix_path
 
     ### PreProcessing Functions
     
@@ -54,8 +61,8 @@ class Processing():
         Abundances are log10'd and then minmax scaled between (0, 1) for easier training.
         """
         np.log10(abundances, out=abundances)
-        np.subtract(abundances, self.abundances_min, out=abundances)
-        np.divide(abundances, (self.abundances_max - self.abundances_min), out=abundances)
+        np.subtract(abundances, self.abundances_min_np, out=abundances)
+        np.divide(abundances, (self.abundances_max_np - self.abundances_min_np), out=abundances)
 
 
     def latent_components_scaling(
@@ -111,6 +118,7 @@ class Processing():
                 self.abundances_max,
                 self.exponential,
             )
+            return abundances
         else:
             ab_min_np = self.abundances_min.cpu().numpy()
             ab_max_np = self.abundances_max.cpu().numpy()
@@ -143,8 +151,9 @@ class Processing():
             self.components_max
         )
 
+
     def save_latents_minmax(
-        DatasetConfig,
+        self,
         AEConfig,
         dataset_t: torch.Tensor,
         inference_functions: Inference,
@@ -153,7 +162,7 @@ class Processing():
 
         with torch.no_grad():
             for i in range(0, len(dataset_t), AEConfig.batch_size):
-                batch = dataset_t[i:i + AEConfig.batch_size].to(AEConfig.device)
+                batch = dataset_t[i:i + AEConfig.batch_size].to(self.device)
                 encoded = inference_functions.encode(batch).cpu()
                 min_ = min(min_, encoded.min().item())
                 max_ = max(max_, encoded.max().item())
@@ -162,6 +171,39 @@ class Processing():
         print(f"Latents MinMax: {minmax_np[0]}, {minmax_np[1]}")
         np.save(AEConfig.latents_minmax_path, minmax_np)
 
+
+    def save_stoichiometric_matrix(self):
+        """
+        Generates a stoichiometric matrix for the elements in the dataset.
+        An unscaled vector of the species multiplied by this matrix will give the elemental abundances, which are conserved.
+        Additionally tracks BULK and SURFACE stoichiometric.
+        """
+        elements = ["H", "HE", "C", "N", "O", "S", "SI", "MG", "CL"]
+        stoichiometric_matrix = np.zeros((len(elements), self.num_species))
+        modified_species = [s.replace("BULK_", "").replace("SURF_", "") for s in self.species]
+        
+        elements_patterns = {
+            'H': re.compile(r'H(?!E)(\d*)'),
+            'HE': re.compile(r'HE(\d*)'),
+            'C': re.compile(r'C(?!L)(\d*)'),
+            'N': re.compile(r'N(\d*)'),
+            'O': re.compile(r'O(\d*)'),
+            'S': re.compile(r'S(?!I)(\d*)'),
+            'SI': re.compile(r'SI(\d*)'),
+            'MG': re.compile(r'MG(\d*)'),
+            'CL': re.compile(r'CL(\d*)'),
+        }
+
+        for element, pattern in elements_patterns.items():
+            elem_index = elements.index(element)
+            for i, species in enumerate(modified_species):
+                match = pattern.search(species)
+                if match and species not in ["SURFACE", "BULK"]:
+                    multiplier = int(match.group(1)) if match.group(1) else 1
+                    stoichiometric_matrix[elem_index, i] = multiplier
+        
+        np.save(self.stoichiometric_matrix_path, stoichiometric_matrix.T)
+        return stoichiometric_matrix.T
 
 @njit
 def calculate_emulator_indices(
@@ -205,14 +247,13 @@ def preprocessing_emulator_dataset(
     num_phys = GeneralConfig.num_phys
     num_metadata = GeneralConfig.num_metadata
     
-    #dataset_np[:, 0] = np.arange(len(dataset_np))
-    new_column = np.arange(len(dataset_np))
-    dataset_np = np.insert(dataset_np, 0, new_column, axis=1) 
+    dataset_np[:, 0] = np.arange(len(dataset_np))
     
     processing_functions.physical_parameter_scaling(dataset_np[:, num_metadata:num_metadata+num_phys])
     processing_functions.abundances_scaling(dataset_np[:, -num_species:])
     
-    latent_components = inference_functions.encode(dataset_np[:, num_metadata+1+num_phys:])
+    latent_components = inference_functions.encode(dataset_np[:, num_metadata+num_phys:])
+    latent_components = processing_functions.latent_components_scaling(latent_components).cpu().numpy()
     encoded_dataset_np = np.hstack((dataset_np, latent_components), dtype=np.float32)
     
     index_pairs_np = calculate_emulator_indices(encoded_dataset_np, EMConfig.window_size)

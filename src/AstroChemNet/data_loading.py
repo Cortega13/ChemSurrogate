@@ -8,20 +8,21 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 
 
 def load_datasets(
-    columns: list
+    GeneralConfig,
+    columns: list,
     ):
     """
     Datasets are loaded from hdf5 files, filtered to only contain the columns of interest, and converted to np arrays for speed.
     """
     training_dataset = pd.read_hdf(
-        DatasetConfig.dataset_path, 
+        GeneralConfig.dataset_path, 
         "train", 
         start=0, 
         #stop=5000,
         #stop=1500000
         ).astype(np.float32)
     validation_dataset = pd.read_hdf(
-        DatasetConfig.dataset_path, 
+        GeneralConfig.dataset_path, 
         "val",
         start=0,
         #stop=5000,
@@ -32,17 +33,17 @@ def load_datasets(
     validation_np = validation_dataset[columns].to_numpy(copy=False)
 
     np.clip(
-        training_np[:, -DatasetConfig.num_species:], 
-        DatasetConfig.abundances_lower_clipping, 
-        DatasetConfig.abundances_upper_clipping, 
-        out=training_np[:, -DatasetConfig.num_species:]
+        training_np[:, -GeneralConfig.num_species:], 
+        GeneralConfig.abundances_lower_clipping, 
+        GeneralConfig.abundances_upper_clipping, 
+        out=training_np[:, -GeneralConfig.num_species:]
     )
 
     np.clip(
-        validation_np[:, -DatasetConfig.num_species:], 
-        DatasetConfig.abundances_lower_clipping, 
-        DatasetConfig.abundances_upper_clipping,
-        out=validation_np[:, -DatasetConfig.num_species:]
+        validation_np[:, -GeneralConfig.num_species:], 
+        GeneralConfig.abundances_lower_clipping, 
+        GeneralConfig.abundances_upper_clipping,
+        out=validation_np[:, -GeneralConfig.num_species:]
     )
     
     print
@@ -53,19 +54,22 @@ def load_datasets(
 
 
 def save_tensors_to_hdf5(
+    GeneralConfig,
     tensors: torch.Tensor, 
     category: str
     ):
     dataset, indices = tensors
-    with h5py.File(f"data/{category}.h5", "w") as f:
+    dataset_path = os.path.join(GeneralConfig.working_path, f"data/{category}.h5")
+    with h5py.File(dataset_path, "w") as f:
         f.create_dataset("dataset", data=dataset.numpy(), dtype=np.float32)
         f.create_dataset("indices", data=indices.numpy(), dtype=np.int32)
 
 
 def load_tensors_from_hdf5(
+    GeneralConfig, 
     category: str
     ):
-    dataset_path = os.path.join(DatasetConfig.working_path, f"data/{category}.h5")
+    dataset_path = os.path.join(GeneralConfig.working_path, f"data/{category}.h5")
     with h5py.File(dataset_path, "r") as f:
         dataset = f["dataset"][:]
         indices = f["indices"][:]
@@ -143,18 +147,18 @@ class AutoencoderDataset(Dataset):
 class EmulatorSequenceDataset(Dataset):
     def __init__(
         self,
+        GeneralConfig,
+        AEConfig, 
         data_matrix: torch.Tensor,
         data_indices: torch.Tensor,
     ):
         self.data_matrix = data_matrix
         self.data_indices = data_indices
-        self.num_tracers = np.unique(data_matrix[:, 1]).shape[0]
         self.num_datapoints = len(data_indices)
-        self.num_metadata = DatasetConfig.num_metadata
-        self.num_physical_parameters = DatasetConfig.num_physical_parameters
-        self.num_species = DatasetConfig.num_species
-        self.num_components = AEConfig.latent_dim
-        self.num_timesteps = DatasetConfig.num_timesteps_per_model
+        self.num_metadata = GeneralConfig.num_metadata
+        self.num_phys = GeneralConfig.num_phys
+        self.num_species = GeneralConfig.num_species
+        self.num_latents = AEConfig.latent_dim
 
         data_matrix_size = self.data_matrix.nbytes / (1024 ** 2)
         indices_matrix_size = self.data_indices.nbytes / (1024 ** 2)
@@ -176,9 +180,9 @@ class EmulatorSequenceDataset(Dataset):
         
         rows = self.data_matrix[data_indices]
         
-        physical_parameters = rows[:, :-1, 1+self.num_metadata: 1+self.num_metadata+self.num_physical_parameters]
-        features = rows[:, 0, -self.num_components:]
-        targets = rows[:, 1:, 1+self.num_metadata+self.num_physical_parameters:-self.num_components]
+        physical_parameters = rows[:, :-1, self.num_metadata: self.num_metadata+self.num_phys]
+        features = rows[:, 0, -self.num_latents:]
+        targets = rows[:, 1:, self.num_metadata+self.num_phys:-self.num_latents]
         
         return physical_parameters, features, targets
 

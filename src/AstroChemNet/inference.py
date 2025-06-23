@@ -2,7 +2,8 @@ import torch
 import numpy as np
 
 class Inference():
-    def __init__(self, processing_functions, autoencoder=None, emulator=None):
+    def __init__(self, GeneralConfig, processing_functions, autoencoder=None, emulator=None):
+        self.device = GeneralConfig.device
         self.autoencoder = autoencoder
         self.emulator = emulator
             
@@ -13,9 +14,9 @@ class Inference():
 
     def convert_to_tensor(self, inputs):
         if isinstance(inputs, np.ndarray):
-            inputs = torch.from_numpy(inputs)
+            inputs = torch.from_numpy(inputs).float().to(self.device)
         elif not isinstance(inputs, torch.Tensor):
-            inputs = torch.tensor(inputs)
+            inputs = torch.tensor(inputs, dtype=torch.float32, device=self.device)
         return inputs
     
     def encode(self, abundances):

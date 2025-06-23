@@ -1,25 +1,36 @@
 import torch
+import numpy as np
 
-class LossFunctions():
-    def __init__(self, constants):
-        self.stoichiometric_matrix = constants.stoichiometric_matrix
-
-    @staticmethod
-    @torch.jit.script
-    def jit_elemental_conservation(
+class Loss():
+    def __init__(self, processing_functions, GeneralConfig, AEConfig=None, EMConfig=None):
+        device = GeneralConfig.device
+        stoichiometric_matrix = np.load(GeneralConfig.stoichiometric_matrix_path)
+        self.stoichiometric_matrix = torch.tensor(stoichiometric_matrix, dtype=torch.float32, device=device)
+        self.exponential = torch.log(torch.tensor(10, device=device).float())
+        self.inverse_abundances_scaling = processing_functions.inverse_abundances_scaling
+        
+        
+        if AEConfig is not None:
+            self.power_weight = torch.tensor(AEConfig.power_weight, dtype=torch.float32, device=device)
+            self.conservation_weight = torch.tensor(AEConfig.conservation_weight, dtype=torch.float32, device=device)
+        else:
+            self.power_weight = torch.tensor(EMConfig.power_weight, dtype=torch.float32, device=device)
+            self.conservation_weight = torch.tensor(EMConfig.conservation_weight, dtype=torch.float32, device=device)
+        
+        
+    def elemental_conservation(
+        self,
         tensor1: torch.Tensor, 
         tensor2: torch.Tensor,
-        stoichiometric_matrix: torch.Tensor,
-        inverse_abundances_scaling: callable,
         ):
         """
         Given the actual and predicted abundances, this function calculates a loss between the elemental abundances of both.
         """
-        unscaled_tensor1 = inverse_abundances_scaling(tensor1)
-        unscaled_tensor2 = inverse_abundances_scaling(tensor2)
-        
-        elemental_abundances1 = torch.abs(torch.matmul(unscaled_tensor1, stoichiometric_matrix))
-        elemental_abundances2 = torch.abs(torch.matmul(unscaled_tensor2, stoichiometric_matrix))
+        unscaled_tensor1 = self.inverse_abundances_scaling(tensor1)
+        unscaled_tensor2 = self.inverse_abundances_scaling(tensor2)
+                
+        elemental_abundances1 = torch.abs(torch.matmul(unscaled_tensor1, self.stoichiometric_matrix))
+        elemental_abundances2 = torch.abs(torch.matmul(unscaled_tensor2, self.stoichiometric_matrix))
 
         log_elemental_abundances1 = torch.log10(elemental_abundances1)
         log_elemental_abundances2 = torch.log10(elemental_abundances2)
@@ -30,8 +41,7 @@ class LossFunctions():
 
 
     @staticmethod
-    @torch.jit.script
-    def jit_elementwise_loss(
+    def elementwise_loss(
         outputs: torch.Tensor,
         targets: torch.Tensor,
         exponential: torch.Tensor,
@@ -41,21 +51,6 @@ class LossFunctions():
         elementwise_loss = torch.exp(power_weight * exponential * elementwise_loss) - 1
         elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
         return elementwise_loss
-
-
-    @staticmethod
-    @torch.jit.script
-    def jit_relative_error(
-        outputs, 
-        targets,
-        inverse_abundances_scaling: callable,
-        ):
-        unscaled_outputs = inverse_abundances_scaling(outputs)
-        unscaled_targets = inverse_abundances_scaling(targets)
-        
-        loss = (torch.abs(unscaled_targets - unscaled_outputs) / unscaled_targets)
-        
-        return torch.sum(loss, dim=0)
 
 
     def training(
@@ -68,9 +63,9 @@ class LossFunctions():
         """
         
         
-        elementwise_loss = self.jit_elementwise_loss(outputs, targets, self.exponential, self.power_weight)
+        elementwise_loss = self.elementwise_loss(outputs, targets, self.exponential, self.power_weight)
         
-        conservation_error = self.conservation_weight * self.jit_elemental_conservation(outputs, targets, self.stoichiometric_matrix, self.inverse_abundances_scaling)  
+        conservation_error = self.conservation_weight * self.elemental_conservation(outputs, targets)  
         
         total_loss = 1e-3 * (elementwise_loss + conservation_error)
         
@@ -82,6 +77,9 @@ class LossFunctions():
         """
         This is the custom loss function for the autoencoder. It's a combination of the reconstruction loss and the conservation loss.
         """
-        loss = self.jit_relative_error(outputs, targets, self.inverse_abundances_scaling)
+        unscaled_outputs = self.inverse_abundances_scaling(outputs)
+        unscaled_targets = self.inverse_abundances_scaling(targets)
         
-        return loss
+        loss = (torch.abs(unscaled_targets - unscaled_outputs) / unscaled_targets)
+        
+        return torch.sum(loss, dim=0)

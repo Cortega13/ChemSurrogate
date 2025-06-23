@@ -3,6 +3,7 @@ import os
 
 from AstroChemNet import data_processing as dp
 from AstroChemNet import data_loading as dl
+from AstroChemNet.loss import Loss
 from AstroChemNet.inference import (
     Inference
 )
@@ -10,69 +11,82 @@ from AstroChemNet.trainer import (
     EmulatorTrainerSequential,
     load_objects
 )
-from .config import (
+from config import (
+    GeneralConfig,
     AEConfig,
     EMConfig
 )
-from .nn import (
+from nn import (
     Autoencoder,
     Emulator
 )
 
-def load_autoencoder(Config):
+def load_autoencoder(GeneralConfig, AEConfig):
     autoencoder = Autoencoder(
-        input_dim=Config.input_dim,
-        latent_dim=Config.latent_dim,
-        hidden_dims=Config.hidden_dims,
-        noise=Config.noise,
-        dropout=Config.dropout,
-    ).to(Config.device)
-    if os.path.exists(Config.pretrained_model_path):
+        input_dim=AEConfig.input_dim,
+        latent_dim=AEConfig.latent_dim,
+        hidden_dims=AEConfig.hidden_dims,
+    ).to(GeneralConfig.device)
+    if os.path.exists(AEConfig.pretrained_model_path):
         print("Loading Pretrained Model")
-        autoencoder.load_state_dict(torch.load(Config.pretrained_model_path))
+        autoencoder.load_state_dict(torch.load(AEConfig.pretrained_model_path))
+    
+    autoencoder.eval()
+    for param in autoencoder.parameters():
+        param.requires_grad = False
     return autoencoder
 
 
-def load_emulator(Config):
+def load_emulator(GeneralConfig, EMConfig):
     emulator = Emulator(
-    ).to(Config.device)
-    if os.path.exists(Config.pretrained_model_path):
+    ).to(GeneralConfig.device)
+    if os.path.exists(EMConfig.pretrained_model_path):
         print("Loading Pretrained Model")
-        emulator.load_state_dict(torch.load(Config.pretrained_model_path))
+        emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path))
     return emulator
 
 
 if __name__ == "__main__":
-    training_np, validation_np = dl.load_datasets(EMConfig.columns)
-    
     processing_functions = dp.Processing(
+        GeneralConfig, 
         AEConfig,
-        EMConfig
     )
-    inference_functions = Inference(AEConfig)
-    training_dataset = dp.preprocessing_emulator_dataset(training_np, processing_functions)
-    validation_dataset = dp.preprocessing_emulator_dataset(validation_np, processing_functions)
-    
-    dl.save_tensors_to_hdf5(training_dataset, category="training_seq")
-    dl.save_tensors_to_hdf5(validation_dataset, category="validation_seq")
+    autoencoder = load_autoencoder(GeneralConfig, AEConfig)
+    inference_functions = Inference(GeneralConfig, processing_functions, autoencoder)
 
-    training_dataset, training_indices = dl.load_tensors_from_hdf5(category="training_seq")
-    validation_dataset, validation_indices = dl.load_tensors_from_hdf5(category="validation_seq")
-    training_Dataset = dl.EmulatorSequenceDataset(training_dataset, training_indices)
-    validation_Dataset = dl.EmulatorSequenceDataset(validation_dataset, validation_indices)
+    # training_np, validation_np = dl.load_datasets(GeneralConfig, EMConfig.columns)
+    # training_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, training_np, processing_functions, inference_functions)
+    # validation_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, validation_np, processing_functions, inference_functions)
+    
+    # dl.save_tensors_to_hdf5(GeneralConfig, training_dataset, category="training_seq")
+    # dl.save_tensors_to_hdf5(GeneralConfig, validation_dataset, category="validation_seq")
+
+    training_dataset, training_indices = dl.load_tensors_from_hdf5(GeneralConfig, category="training_seq")
+    validation_dataset, validation_indices = dl.load_tensors_from_hdf5(GeneralConfig, category="validation_seq")
+    training_Dataset = dl.EmulatorSequenceDataset(GeneralConfig, AEConfig, training_dataset, training_indices)
+    validation_Dataset = dl.EmulatorSequenceDataset(GeneralConfig, AEConfig, validation_dataset, validation_indices)
     del training_dataset, validation_dataset, training_indices, validation_indices
 
     training_dataloader = dl.tensor_to_dataloader(EMConfig, training_Dataset)
     validation_dataloader = dl.tensor_to_dataloader(EMConfig, validation_Dataset)
     
     
-    autoencoder = load_autoencoder(AEConfig)
-    emulator = load_emulator(EMConfig)
-    optimizer, scheduler = load_objects(emulator)
+    emulator = load_emulator(GeneralConfig, EMConfig)
+    optimizer, scheduler = load_objects(emulator, EMConfig)
     
+    loss_functions = Loss(
+        processing_functions,
+        GeneralConfig,
+        EMConfig=EMConfig,
+    )
     emulator_trainer = EmulatorTrainerSequential(
-        emulator,
+        GeneralConfig,
+        AEConfig,
+        EMConfig,
+        loss_functions,
+        processing_functions,
         autoencoder,
+        emulator,
         optimizer,
         scheduler,
         training_dataloader,

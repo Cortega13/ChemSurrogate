@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.1, dropout=0.0):
+    def __init__(self, input_dim=333, latent_dim=12, hidden_dims=(320,160), noise=0.0, dropout=0.0):
         super(Autoencoder, self).__init__()
         
         self.encoder_fc1 = nn.Linear(input_dim, hidden_dims[0], bias=False)
@@ -54,15 +54,15 @@ class Autoencoder(nn.Module):
 
 
 class Emulator(nn.Module):
-    def __init__(self, input_dim=18, output_dim=14, hidden_dim=128, dropout=0.0):
+    def __init__(self, input_dim=18, output_dim=14, hidden_dim=256, dropout=0.0):
         super(Emulator, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             
             nn.Linear(hidden_dim, output_dim)
@@ -74,10 +74,8 @@ class Emulator(nn.Module):
         for t in range(0, T):
             current_phys = phys[:, t, :]
             inputs = torch.cat([current_phys, latents], dim=1)
-            next_latents = self.model(inputs)
-            latents = next_latents
-            outputs.append(next_latents)
+            latents = latents + self.net(inputs)
+            outputs.append(latents)
         
         outputs = torch.cat(outputs, dim=1)
-        x = self.net(x)
-        return x
+        return outputs

@@ -2,6 +2,8 @@ import os
 import numpy as np
 import pandas as pd
 import torch
+import re
+
 
 def rename_columns(columns):
     """Renames column names containing chemical species using substring replacement."""
@@ -43,39 +45,6 @@ def rename_columns(columns):
         new_columns.append(new_col)
 
     return new_columns
-
-
-def generate_stoichiometric_matrix():
-    """
-    Generates a stoichiometric matrix for the elements in the dataset.
-    An unscaled vector of the species multiplied by this matrix will give the elemental abundances, which are conserved.
-    Additionally tracks BULK and SURFACE stoichiometric.
-    """
-    elements = ["H", "HE", "C", "N", "O", "S", "SI", "MG", "CL"]
-    stoichiometric_matrix = np.zeros((len(elements), DatasetConfig.num_species))
-    modified_species = [s.replace("BULK_", "").replace("SURF_", "") for s in DatasetConfig.species]
-    
-    elements_patterns = {
-        'H': re.compile(r'H(?!E)(\d*)'),
-        'HE': re.compile(r'HE(\d*)'),
-        'C': re.compile(r'C(?!L)(\d*)'),
-        'N': re.compile(r'N(\d*)'),
-        'O': re.compile(r'O(\d*)'),
-        'S': re.compile(r'S(?!I)(\d*)'),
-        'SI': re.compile(r'SI(\d*)'),
-        'MG': re.compile(r'MG(\d*)'),
-        'CL': re.compile(r'CL(\d*)'),
-    }
-
-    for element, pattern in elements_patterns.items():
-        elem_index = elements.index(element)
-        for i, species in enumerate(modified_species):
-            match = pattern.search(species)
-            if match and species not in ["SURFACE", "BULK"]:
-                multiplier = int(match.group(1)) if match.group(1) else 1
-                stoichiometric_matrix[elem_index, i] = multiplier
-        
-    return stoichiometric_matrix.T
 
 
 def convertUCLCHEMbaseAvtoAv(
