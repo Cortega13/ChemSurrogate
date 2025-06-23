@@ -76,7 +76,7 @@ class EMConfig:
     lr_decay = 0.5
     lr_decay_patience = 4
     betas = (0.99, 0.999)
-    weight_decay = 1e-3
+    weight_decay = 1e-4
     power_weight = 20
     conservation_weight = 1e3
     batch_size = 2*int(1024)

@@ -54,7 +54,7 @@ class Autoencoder(nn.Module):
 
 
 class Emulator(nn.Module):
-    def __init__(self, input_dim=18, output_dim=14, hidden_dim=256, dropout=0.0):
+    def __init__(self, input_dim=18, output_dim=14, hidden_dim=32, dropout=0.0):
         super(Emulator, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
