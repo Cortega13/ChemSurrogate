@@ -39,6 +39,9 @@ def load_autoencoder(GeneralConfig, AEConfig):
 
 def load_emulator(GeneralConfig, EMConfig):
     emulator = Emulator(
+        input_dim=EMConfig.input_dim,
+        output_dim=EMConfig.output_dim,
+        hidden_dim=EMConfig.hidden_dim
     ).to(GeneralConfig.device)
     if os.path.exists(EMConfig.pretrained_model_path):
         print("Loading Pretrained Model")
@@ -54,15 +57,16 @@ if __name__ == "__main__":
     autoencoder = load_autoencoder(GeneralConfig, AEConfig)
     inference_functions = Inference(GeneralConfig, processing_functions, autoencoder)
 
-    # training_np, validation_np = dl.load_datasets(GeneralConfig, EMConfig.columns)
-    # training_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, training_np, processing_functions, inference_functions)
-    # validation_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, validation_np, processing_functions, inference_functions)
+    training_np, validation_np = dl.load_datasets(GeneralConfig, EMConfig.columns)
+    training_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, training_np, processing_functions, inference_functions)
+    validation_dataset = dp.preprocessing_emulator_dataset(GeneralConfig, EMConfig, validation_np, processing_functions, inference_functions)
     
-    # dl.save_tensors_to_hdf5(GeneralConfig, training_dataset, category="training_seq")
-    # dl.save_tensors_to_hdf5(GeneralConfig, validation_dataset, category="validation_seq")
-
+    dl.save_tensors_to_hdf5(GeneralConfig, training_dataset, category="training_seq")
+    dl.save_tensors_to_hdf5(GeneralConfig, validation_dataset, category="validation_seq")
+    
     training_dataset, training_indices = dl.load_tensors_from_hdf5(GeneralConfig, category="training_seq")
     validation_dataset, validation_indices = dl.load_tensors_from_hdf5(GeneralConfig, category="validation_seq")
+    
     training_Dataset = dl.EmulatorSequenceDataset(GeneralConfig, AEConfig, training_dataset, training_indices)
     validation_Dataset = dl.EmulatorSequenceDataset(GeneralConfig, AEConfig, validation_dataset, validation_indices)
     del training_dataset, validation_dataset, training_indices, validation_indices

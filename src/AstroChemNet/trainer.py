@@ -40,8 +40,8 @@ class Trainer:
         self.scheduler = scheduler
         self.training_dataloader = training_dataloader
         self.validation_dataloader = validation_dataloader
-        self.num_validation_batches = len(self.validation_dataloader.dataset)
-        
+        self.num_validation_elements = len(self.validation_dataloader.dataset)
+                
         self.current_dropout_rate = self.model_config.dropout
         self.best_weights = None
         self.metric_minimum_loss = np.inf
@@ -99,7 +99,7 @@ class Trainer:
         Uses a metric for the minimum loss which gives weight to the mean and std relative errors.
         Includes a scheduler to reduce the learning rate once the minimum loss stagnates.
         """
-        val_loss = self.epoch_validation_loss / self.num_validation_batches
+        val_loss = self.epoch_validation_loss / self.num_validation_elements
         mean_loss = val_loss.mean().item()
         std_loss = val_loss.std().item()
         max_loss = val_loss.max().item()
@@ -318,9 +318,9 @@ class EmulatorTrainerSequential(Trainer):
         outputs = outputs.reshape(-1, self.latent_dim)
         outputs = self.inverse_latent_components_scaling(outputs)
         outputs = self.ae.decode(outputs)
-        targets = targets.reshape(-1, 333)
-        
-        loss = self.validation_loss(outputs, targets)
+        outputs = outputs.reshape(targets.size(0), targets.size(1), -1)
+                                
+        loss = self.validation_loss(outputs, targets).mean(dim=0)
         
         self.epoch_validation_loss += loss.detach()
 

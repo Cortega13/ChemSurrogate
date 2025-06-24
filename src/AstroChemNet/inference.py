@@ -20,25 +20,28 @@ class Inference():
         return inputs
     
     def encode(self, abundances):
-        abundances = self.convert_to_tensor(abundances)
-        latents = self.autoencoder.encode(abundances)
-        return latents
+        with torch.no_grad():
+            abundances = self.convert_to_tensor(abundances)
+            latents = self.autoencoder.encode(abundances)
+            return latents
 
 
     def decode(self, latents):
-        latents = self.convert_to_tensor(latents)
-        scaled_abundances = self.autoencoder.decode(latents)
-        abundances = self.inverse_abundances_scaling(scaled_abundances)
-        return abundances
+        with torch.no_grad():
+            latents = self.convert_to_tensor(latents)
+            scaled_abundances = self.autoencoder.decode(latents)
+            abundances = self.inverse_abundances_scaling(scaled_abundances)
+            return abundances
 
 
     def latent_emulate(self, phys, latents):
-        phys = self.convert_to_tensor(phys)
-        latents = self.convert_to_tensor(latents)
-        scaled_latents = self.latent_components_scaling(latents)
-        scaled_evolved_latents = self.emulator(scaled_latents)
-        evolved_latents = self.inverse_latent_components_scaling(scaled_evolved_latents)
-        return evolved_latents
+        with torch.no_grad():
+            phys = self.convert_to_tensor(phys)
+            latents = self.convert_to_tensor(latents)
+            scaled_latents = self.latent_components_scaling(latents)
+            scaled_evolved_latents = self.emulator(scaled_latents)
+            evolved_latents = self.inverse_latent_components_scaling(scaled_evolved_latents)
+            return evolved_latents
 
     def emulate(self, phys, abundances):
         encoded_abundances = self.encode(abundances)

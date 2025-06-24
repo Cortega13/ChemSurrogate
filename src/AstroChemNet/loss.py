@@ -16,7 +16,20 @@ class Loss():
         else:
             self.power_weight = torch.tensor(EMConfig.power_weight, dtype=torch.float32, device=device)
             self.conservation_weight = torch.tensor(EMConfig.conservation_weight, dtype=torch.float32, device=device)
-        
+    
+    
+    @staticmethod
+    def elementwise_loss(
+        outputs: torch.Tensor,
+        targets: torch.Tensor,
+        exponential: torch.Tensor,
+        power_weight: torch.Tensor,
+        ):
+        elementwise_loss = torch.abs(outputs - targets)
+        elementwise_loss = torch.exp(power_weight * exponential * elementwise_loss) - 1
+        elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
+        return elementwise_loss
+
         
     def elemental_conservation(
         self,
@@ -38,19 +51,6 @@ class Loss():
         diff = torch.abs(log_elemental_abundances2 - log_elemental_abundances1)
         
         return torch.sum(diff) / tensor1.size(0)
-
-
-    @staticmethod
-    def elementwise_loss(
-        outputs: torch.Tensor,
-        targets: torch.Tensor,
-        exponential: torch.Tensor,
-        power_weight: torch.Tensor,
-        ):
-        elementwise_loss = torch.abs(outputs - targets)
-        elementwise_loss = torch.exp(power_weight * exponential * elementwise_loss) - 1
-        elementwise_loss = torch.sum(elementwise_loss) / targets.size(0)
-        return elementwise_loss
 
 
     def training(

@@ -69,7 +69,8 @@ class EMConfig:
     # Model Config
     input_dim = GeneralConfig.num_phys + AEConfig.latent_dim
     output_dim = AEConfig.latent_dim
-    window_size = 3
+    hidden_dim = 256
+    window_size = 240
     
     # Hyperparameters Config
     lr = 5e-4
@@ -79,7 +80,7 @@ class EMConfig:
     weight_decay = 1e-4
     power_weight = 20
     conservation_weight = 1e3
-    batch_size = 2*int(1024)
+    batch_size = int(1024)
     stagnant_epoch_patience = 20
     gradient_clipping = 2
     pretrained_model_path = os.path.join(GeneralConfig.working_path, "weights/mlp.pth")
