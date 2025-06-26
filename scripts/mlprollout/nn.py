@@ -58,24 +58,25 @@ class Emulator(nn.Module):
         super(Emulator, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Dropout(dropout),
             
             nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Dropout(dropout),
             
             nn.Linear(hidden_dim, output_dim)
         )
         
     def forward(self, phys, latents):
-        T = phys.size(1)
-        outputs = []
-        for t in range(0, T):
-            current_phys = phys[:, t, :]
-            inputs = torch.cat([current_phys, latents], dim=1)
-            latents = latents + self.net(inputs)
-            outputs.append(latents)
-        
-        outputs = torch.cat(outputs, dim=1)
-        return outputs
+        B, T, P = phys.shape
+        L = latents.shape[1]
+        outputs = torch.empty(B, T, L, device=latents.device, dtype=latents.dtype)
+
+        for t in range(T):
+            current_phys = phys[:, t, :]  # [B, P]
+            input = torch.cat([current_phys, latents], dim=1)  # [B, P+L]
+            latents = latents + self.net(input)
+            outputs[:, t, :] = latents
+
+        return outputs.view(B, T * L)

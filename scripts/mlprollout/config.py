@@ -75,17 +75,17 @@ class EMConfig:
     # Hyperparameters Config
     lr = 5e-4
     lr_decay = 0.5
-    lr_decay_patience = 4
+    lr_decay_patience = 5
     betas = (0.99, 0.999)
-    weight_decay = 1e-4
+    weight_decay = 1e-3
     power_weight = 20
     conservation_weight = 1e3
-    batch_size = int(1024)
+    batch_size = 5*int(512)
     stagnant_epoch_patience = 20
-    gradient_clipping = 2
+    gradient_clipping = 1
     pretrained_model_path = os.path.join(GeneralConfig.working_path, "weights/mlp.pth")
     save_model_path = os.path.join(GeneralConfig.working_path, "weights/mlp.pth")
-    dropout_decay_patience = 8
+    dropout_decay_patience = 3
     dropout_reduction_factor = 0.05
     dropout = 0.0
     save_model = True
