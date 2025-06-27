@@ -79,4 +79,4 @@ class Emulator(nn.Module):
             latents = latents + self.net(input)
             outputs[:, t, :] = latents
 
-        return outputs.view(B, T * L)
+        return outputs

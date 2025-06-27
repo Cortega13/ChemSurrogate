@@ -11,12 +11,12 @@ from AstroChemNet.trainer import (
     EmulatorTrainerSequential,
     load_objects
 )
-from config import (
+from emulator.config import (
     GeneralConfig,
     AEConfig,
     EMConfig
 )
-from nn import (
+from emulator.nn import (
     Autoencoder,
     Emulator
 )
@@ -37,7 +37,7 @@ def load_autoencoder(GeneralConfig, AEConfig):
     return autoencoder
 
 
-def load_emulator(GeneralConfig, EMConfig):
+def load_emulator(GeneralConfig, EMConfig, inference=False):
     emulator = Emulator(
         input_dim=EMConfig.input_dim,
         output_dim=EMConfig.output_dim,
@@ -46,6 +46,10 @@ def load_emulator(GeneralConfig, EMConfig):
     if os.path.exists(EMConfig.pretrained_model_path):
         print("Loading Pretrained Model")
         emulator.load_state_dict(torch.load(EMConfig.pretrained_model_path))
+    if inference:
+        emulator.eval()
+        for param in emulator.parameters():
+            param.requires_grad = False
     return emulator
 
 
