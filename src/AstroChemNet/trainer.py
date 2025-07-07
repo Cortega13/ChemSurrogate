@@ -58,7 +58,7 @@ class Trainer:
         """
         Saves the loss per epoch to a file.
         """
-        epochs_path =  os.path.join(os.path.splitext(self.model_config.save_model_path)[0], "_epochs.json")
+        epochs_path = os.path.splitext(self.model_config.save_model_path)[0] + ".json"
         with open(epochs_path, "w") as f:
             json.dump(self.loss_per_epoch, f, indent=4)
 
@@ -147,6 +147,9 @@ class Trainer:
                 self.model.load_state_dict(self.best_weights)
         
         self.loss_per_epoch.append({
+            "mean": mean_loss,
+            "std": std_loss,
+            "max": max_loss,
             "metric": metric,
             "dropout": self.current_dropout_rate,
             "learning_rate": self.current_learning_rate,
@@ -171,7 +174,7 @@ class Trainer:
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-        for epoch in range(999999):
+        for epoch in range(9999999):
             self._run_epoch(epoch)
             self._check_minimum_loss()
             if self._check_early_stopping():
@@ -181,7 +184,7 @@ class Trainer:
         torch.cuda.empty_cache()
         print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
         self.print_final_time()
-        self.save_epochs()
+        self.save_loss_per_epoch()
 
 
 class AutoencoderTrainer(Trainer):

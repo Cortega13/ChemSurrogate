@@ -44,19 +44,19 @@ class AEConfig:
     latent_dim = 14
     
     # Hyperparameters Config
-    lr = 1e-4
+    lr = 1e-3
     lr_decay = 0.5
     lr_decay_patience = 10
     betas = (0.99, 0.999)
     weight_decay = 1e-4
     power_weight = 40
-    conservation_weight = 1e2
+    conservation_weight = 0 #1e2
     batch_size = 8*8192
     stagnant_epoch_patience = 20
     gradient_clipping = 2
     dropout_decay_patience = 8
     dropout_reduction_factor = 0.05
-    dropout = 0.0
+    dropout = 0.3
     noise = 0.1
     shuffle_chunk_size = 1
     save_model = True
