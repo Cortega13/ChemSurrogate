@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.backends import cudnn
 import copy
 from torch.profiler import profile, record_function, ProfilerActivity
+import json
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -43,6 +44,7 @@ class Trainer:
         self.num_validation_elements = len(self.validation_dataloader.dataset)
                 
         self.current_dropout_rate = self.model_config.dropout
+        self.current_learning_rate = self.model_config.lr
         self.best_weights = None
         self.metric_minimum_loss = np.inf
         self.epoch_validation_loss = torch.zeros(
@@ -50,6 +52,15 @@ class Trainer:
         ).to(device)
         self.stagnant_epochs = 0
         self.loss_per_epoch = []
+
+
+    def save_loss_per_epoch(self):
+        """
+        Saves the loss per epoch to a file.
+        """
+        epochs_path =  os.path.join(os.path.splitext(self.model_config.save_model_path)[0], "_epochs.json")
+        with open(epochs_path, "w") as f:
+            json.dump(self.loss_per_epoch, f, indent=4)
 
 
     def print_final_time(self):
@@ -104,7 +115,7 @@ class Trainer:
         std_loss = val_loss.std().item()
         max_loss = val_loss.max().item()
         metric = mean_loss# + std_loss + 0.5*max_loss
-
+        
         if metric < self.metric_minimum_loss:
             print("**********************")
             print(f"New Minimum \nMean: {mean_loss:.3e} \nStd: {std_loss:.3e} \nMax: {max_loss:.3e} \nMetric: {metric:.3e} \nPercent Improvement: {(100-metric*100/self.metric_minimum_loss):.3f}%")
@@ -113,7 +124,6 @@ class Trainer:
             
             self.metric_minimum_loss = metric
             self.stagnant_epochs = 0
-            self.loss_per_epoch.append(metric)
         else:
             self.stagnant_epochs += 1
             print(f"Stagnant {self.stagnant_epochs} \nMinimum: {self.metric_minimum_loss:.3e} \nMean: {mean_loss:.3e} \nStd: {std_loss:.3e} \nMax: {max_loss:.3e} \nMetric: {metric:.3e}")
@@ -124,17 +134,23 @@ class Trainer:
                     self.stagnant_epochs = 0
                     self.set_dropout_rate(new_dropout)
                     
-                    learning_rate = 1e-3 if new_dropout <= 0.1 else self.model_config.lr
+                    self.current_learning_rate = 1e-3 if new_dropout <= 0.1 else self.model_config.lr
                     
                     for param_group in self.optimizer.param_groups:
-                        param_group['lr'] = learning_rate
+                        param_group['lr'] = self.current_learning_rate
                     
-                    print(f"Decreasing dropout rate to {self.current_dropout_rate:.4f} and settings lr to {learning_rate:.4f}.")
+                    print(f"Decreasing dropout rate to {self.current_dropout_rate:.4f} and settings lr to {self.current_learning_rate:.4f}.")
+            
             
             if self.stagnant_epochs == self.model_config.lr_decay_patience+1:
                 print("Reverting to previous best weights")
                 self.model.load_state_dict(self.best_weights)
         
+        self.loss_per_epoch.append({
+            "metric": metric,
+            "dropout": self.current_dropout_rate,
+            "learning_rate": self.current_learning_rate,
+        })
         self.epoch_validation_loss.zero_()
         self.scheduler.step(metric)
         print()
@@ -165,6 +181,7 @@ class Trainer:
         torch.cuda.empty_cache()
         print(f"\nTraining Complete. Trial Results: {self.metric_minimum_loss}")
         self.print_final_time()
+        self.save_epochs()
 
 
 class AutoencoderTrainer(Trainer):
